@@ -27,7 +27,7 @@ YouTrack is where developers manage their work — but when it's time to actuall
 
 ## 📱 UI Approach — Inside YouTrack Mobile
 
-The interface replicates YouTrack's existing mobile design language [web:53][web:56]:
+The interface replicates YouTrack's existing mobile design language:
 
 - **Navigation**: Follows YouTrack's left-hand vertical panel pattern, adapted for mobile bottom tab bar
 - **New tab added**: A "☁️ Dev" tab appears alongside Issues, Boards, and Articles
