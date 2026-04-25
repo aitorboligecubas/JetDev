@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# JetDev generated projects
+/generator/output/
+/generated/
+
+# environment variables
+.env
