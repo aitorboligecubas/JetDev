@@ -79,10 +79,15 @@ async function fetchJson(method, path, body) {
     const r = await fetchJson('GET', `/task/${created.taskId}`);
     if (r.status !== 200) throw new Error(`got ${r.status}`);
     if (r.json.id !== created.taskId) throw new Error('id mismatch');
-    if (r.json.status !== 'queued') throw new Error(`status mismatch, got ${r.json.status}`);
+    // Status may already have advanced past "queued" since the pipeline runs
+    // fire-and-forget. Accept any of the official non-terminal early states.
+    const acceptable = new Set(['queued', 'generating', 'building', 'deploying', 'pushing', 'deployed']);
+    if (!acceptable.has(r.json.status)) {
+      throw new Error(`unexpected status: ${r.json.status}`);
+    }
     const required = [
       'id', 'prompt', 'projectId', 'status', 'logs',
-      'previewUrl', 'repoUrl', 'branch', 'error',
+      'previewUrl', 'repoUrl', 'branch', 'intellijUrl', 'error',
       'createdAt', 'updatedAt',
     ];
     for (const f of required) {
