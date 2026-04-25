@@ -16,9 +16,11 @@ const MAX_LOGS_PER_TASK = 200;
  * @property {string}  projectId
  * @property {string}  status        One of TASK_STATES
  * @property {string[]} logs
+ * @property {string|null} projectPath
  * @property {string|null} previewUrl
  * @property {string|null} repoUrl
  * @property {string|null} branch
+ * @property {string|null} branchUrl
  * @property {string|null} intellijUrl  Optional jetbrains:// deep link from Arnau
  * @property {string|null} error
  * @property {string}  createdAt     ISO timestamp
@@ -40,9 +42,11 @@ function buildTask({ prompt, projectId }) {
     projectId: projectId || 'demo',
     status: TASK_STATES.QUEUED,
     logs: [],
+    projectPath: null,
     previewUrl: null,
     repoUrl: null,
     branch: null,
+    branchUrl: null,
     intellijUrl: null,
     error: null,
     createdAt,

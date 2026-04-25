@@ -8,7 +8,6 @@ import {
   failTask,
 } from '../store/tasks.js';
 import { generateProject } from './generator.js';
-import { pushToGitHub } from './github.js';
 
 // Small visual delay between transient states so the polling UI can render
 // "building" and "deploying" before they flip to the next one. Configurable
@@ -21,8 +20,8 @@ const TRANSIENT_DELAY_MS = Number.parseInt(process.env.PIPELINE_TRANSIENT_DELAY_
  * persisted into the task as `error` + status `error`.
  *
  * State machine:
- *   queued -> generating -> building -> deploying -> pushing -> deployed
- *                                                                 \-> error (any step)
+ *   queued -> generating -> building -> deploying -> deployed
+ *                                                  \-> error (any step)
  *
  * @param {string} taskId
  * @returns {Promise<void>}
@@ -55,27 +54,13 @@ export async function runPipeline(taskId) {
 
     updateTask(taskId, { status: TASK_STATES.DEPLOYING });
     addLog(taskId, 'Deploying preview');
-    updateTask(taskId, { previewUrl: generation.previewUrl });
-    await sleep(TRANSIENT_DELAY_MS);
-
-    updateTask(taskId, { status: TASK_STATES.PUSHING });
-    addLog(taskId, 'Pushing to GitHub');
-
-    const gitResult = await pushToGitHub({
-      projectPath: generation.projectPath,
-      taskId,
-    });
-    if (!gitResult || !gitResult.repoUrl || !gitResult.branch) {
-      throw new Error('pushToGitHub returned an invalid result');
-    }
-
     updateTask(taskId, {
-      status: TASK_STATES.DEPLOYED,
-      repoUrl: gitResult.repoUrl,
-      branch: gitResult.branch,
-      intellijUrl: gitResult.intellijUrl ?? null,
+      previewUrl: generation.previewUrl,
+      projectPath: generation.projectPath,
     });
-    addLog(taskId, 'Done');
+    await sleep(TRANSIENT_DELAY_MS);
+    updateTask(taskId, { status: TASK_STATES.DEPLOYED });
+    addLog(taskId, 'Ready for acceptance');
 
     logger.info(`Pipeline finished for task ${taskId}`);
   } catch (err) {
