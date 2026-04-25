@@ -241,6 +241,25 @@ Rules:
 - Responsive with media queries, Smooth transitions
 - NO markdown, NO explanations — ONLY the valid JSON object`;
 
+const REPAIR_SYSTEM = `You are fixing a broken React/Vite project build.
+
+You will receive:
+- The current src/App.jsx and src/App.css
+- A Vite/esbuild build error message
+
+Return ONLY a valid JSON object:
+{
+  "appJsx": "complete code for src/App.jsx",
+  "appCss": "complete code for src/App.css"
+}
+
+Rules:
+- Make the MINIMAL changes needed to fix the error
+- Ensure valid JSX (tags match, components return a single root, etc.)
+- Keep the same general UI intent/style
+- No external libraries, only React + CSS
+- NO markdown, NO explanations — ONLY JSON`;
+
 async function generateCodeWithOpenAI(enhancedPrompt, projectPath) {
   const apiKey = process.env.OPENAI_API_KEY;
   const openai = new OpenAI({ apiKey });
@@ -262,6 +281,40 @@ async function generateCodeWithOpenAI(enhancedPrompt, projectPath) {
   }
 
   // Escribir los resultados en tiempo real sobre el proyecto del usuario
+  fs.writeFileSync(path.join(projectPath, "src", "App.jsx"), parsed.appJsx, "utf-8");
+  fs.writeFileSync(path.join(projectPath, "src", "App.css"), parsed.appCss, "utf-8");
+}
+
+async function repairBuildWithOpenAI({ enhancedPrompt, projectPath, buildError }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const openai = new OpenAI({ apiKey });
+
+  const appJsx = fs.readFileSync(path.join(projectPath, "src", "App.jsx"), "utf-8");
+  const appCss = fs.readFileSync(path.join(projectPath, "src", "App.css"), "utf-8");
+
+  const userPayload = [
+    `Enhanced prompt (for intent):\n${enhancedPrompt}\n`,
+    `Build error:\n${String(buildError || "").slice(0, 2500)}\n`,
+    `Current src/App.jsx:\n${appJsx}\n`,
+    `Current src/App.css:\n${appCss}\n`,
+  ].join("\n---\n");
+
+  const res = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: REPAIR_SYSTEM },
+      { role: "user", content: userPayload },
+    ],
+    temperature: 0.2,
+    max_tokens: 8000,
+    response_format: { type: "json_object" },
+  });
+
+  const parsed = JSON.parse(res.choices[0].message.content);
+  if (!parsed.appJsx || !parsed.appCss) {
+    throw new Error("OpenAI repair returned invalid JSON shape.");
+  }
+
   fs.writeFileSync(path.join(projectPath, "src", "App.jsx"), parsed.appJsx, "utf-8");
   fs.writeFileSync(path.join(projectPath, "src", "App.css"), parsed.appCss, "utf-8");
 }
@@ -414,7 +467,25 @@ async function generateProject({ prompt, taskId }) {
   try {
     execSync("npm run build", { cwd: projectPath, stdio: "pipe", timeout: 60000 });
   } catch (e) {
-    throw new Error(`Build failed: ${(e.stderr || e.message).toString().slice(0, 300)}`);
+    const msg = (e.stderr || e.message).toString();
+    emit("build", "update", "Building project", "Fixing build");
+    // If codegen produced invalid JSX/HTML (common esbuild transform errors), try a single repair pass.
+    if (/vite:esbuild|transform failed|Unexpected closing/i.test(msg)) {
+      try {
+        await repairBuildWithOpenAI({
+          enhancedPrompt,
+          projectPath,
+          buildError: msg,
+        });
+        emit("build", "update", "Building project", "Rebuilding");
+        execSync("npm run build", { cwd: projectPath, stdio: "pipe", timeout: 60000 });
+      } catch (repairErr) {
+        const repairMsg = (repairErr?.message || repairErr).toString();
+        throw new Error(`Build failed: ${msg.slice(0, 800)}\n\nRepair failed: ${repairMsg.slice(0, 400)}`);
+      }
+    } else {
+      throw new Error(`Build failed: ${msg.slice(0, 800)}`);
+    }
   }
   console.log("   ✅ Build successful");
   emit("build", "done", "Building project", "Vite");
