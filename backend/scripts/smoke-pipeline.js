@@ -1,6 +1,7 @@
 import { createTask, getTask, _resetStore } from '../src/store/tasks.js';
 import { TASK_STATES } from '../src/utils/states.js';
 import { runPipeline } from '../src/services/pipeline.js';
+import { pushToGitHub } from '../src/services/github.js';
 
 let pass = 0;
 let fail = 0;
@@ -22,7 +23,7 @@ function header(t) {
 _resetStore();
 
 (async () => {
-  header('happy path');
+  header('happy path: pipeline ends in deployed (no auto push)');
   const happy = createTask({ prompt: 'Build a gym landing page', projectId: 'demo' });
   assert(happy.status === TASK_STATES.QUEUED, 'starts in queued');
 
@@ -31,9 +32,9 @@ _resetStore();
   const finalTask = getTask(happy.id);
   assert(finalTask.status === TASK_STATES.DEPLOYED, 'ends in deployed');
   assert(typeof finalTask.previewUrl === 'string' && finalTask.previewUrl.includes(happy.id), 'previewUrl set');
-  assert(typeof finalTask.repoUrl === 'string' && finalTask.repoUrl.includes(happy.id), 'repoUrl set');
-  assert(typeof finalTask.branch === 'string' && finalTask.branch.startsWith('ai/'), 'branch named ai/...');
-  assert(typeof finalTask.intellijUrl === 'string' && finalTask.intellijUrl.startsWith('jetbrains://'), 'intellijUrl is a deep link');
+  assert(typeof finalTask.projectPath === 'string', 'projectPath persisted on the task');
+  assert(finalTask.repoUrl === null, 'repoUrl not set yet (push happens on accept)');
+  assert(finalTask.branch === null, 'branch not set yet');
   assert(finalTask.error === null, 'no error');
 
   const expectedLogs = [
@@ -41,12 +42,22 @@ _resetStore();
     'Generating code',
     'Building project',
     'Deploying preview',
-    'Pushing to GitHub',
-    'Done',
+    'Ready for acceptance',
   ];
   for (const expected of expectedLogs) {
     assert(finalTask.logs.includes(expected), `log contains "${expected}"`);
   }
+
+  header('happy path: accept step pushes to GitHub (mock)');
+  const gitResult = await pushToGitHub({
+    projectPath: finalTask.projectPath,
+    taskId: happy.id,
+    prompt: happy.prompt,
+  });
+  assert(typeof gitResult.repoUrl === 'string' && gitResult.repoUrl.length > 0, 'repoUrl returned');
+  assert(typeof gitResult.branch === 'string' && gitResult.branch === 'main', 'branch is "main"');
+  assert(typeof gitResult.branchUrl === 'string' && gitResult.branchUrl.includes(gitResult.repoUrl), 'branchUrl points at repo');
+  assert(typeof gitResult.intellijUrl === 'string' && gitResult.intellijUrl.startsWith('jetbrains://'), 'intellijUrl is a deep link');
 
   header('error path: generator fails');
   const genFail = createTask({ prompt: 'this prompt has __force_generator_error__ inside', projectId: 'demo' });
@@ -58,14 +69,19 @@ _resetStore();
   assert(genFailFinal.repoUrl === null, 'no repoUrl on generator failure');
   assert(genFailFinal.logs.some((l) => l.startsWith('Error:')), 'error appears in logs');
 
-  header('error path: github fails');
-  const ghFail = createTask({ prompt: '__force_github_error__ pls', projectId: 'demo' });
-  await runPipeline(ghFail.id);
-  const ghFailFinal = getTask(ghFail.id);
-  assert(ghFailFinal.status === TASK_STATES.ERROR, 'ends in error');
-  assert(ghFailFinal.previewUrl !== null, 'previewUrl was set before github step failed');
-  assert(ghFailFinal.repoUrl === null, 'repoUrl never set');
-  assert(ghFailFinal.branch === null, 'branch never set');
+  header('error path: github fails (forced via mock keyword on accept)');
+  let pushError = null;
+  try {
+    await pushToGitHub({
+      projectPath: '/generated/forced/__force_github_error__',
+      taskId: 'task-forced-error',
+      prompt: 'force github failure',
+    });
+  } catch (err) {
+    pushError = err;
+  }
+  assert(pushError instanceof Error, 'pushToGitHub throws when projectPath has the failure keyword');
+  assert(/forced by projectPath keyword/i.test(pushError?.message ?? ''), 'error message identifies the cause');
 
   header('unknown task id is a no-op');
   await runPipeline('does-not-exist');

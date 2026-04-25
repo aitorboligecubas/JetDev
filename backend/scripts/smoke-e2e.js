@@ -47,7 +47,7 @@ async function pollUntil(taskId, predicate, { timeoutMs = 15000, intervalMs = 25
 }
 
 (async () => {
-  header('happy path end-to-end');
+  header('happy path: POST /generate -> deployed');
 
   const t0 = Date.now();
   const create = await fetchJson('POST', '/generate', {
@@ -65,7 +65,7 @@ async function pollUntil(taskId, predicate, { timeoutMs = 15000, intervalMs = 25
   const taskId = create.json?.taskId;
   if (!taskId) {
     bad('no taskId returned');
-    return;
+    process.exit(1);
   }
   ok(`taskId returned: ${taskId}`);
 
@@ -78,36 +78,36 @@ async function pollUntil(taskId, predicate, { timeoutMs = 15000, intervalMs = 25
     ok(`task moved past queued (saw: ${[...intermediate.seenStatuses].join(', ')})`);
   } catch (err) {
     bad(`task stuck in queued: ${err.message}`);
-    return;
+    process.exit(1);
   }
 
-  let final;
+  let deployed;
   try {
-    final = await pollUntil(taskId, (t) => t.status === 'deployed' || t.status === 'error', { timeoutMs: 15000 });
-    ok(`task reached terminal state: ${final.task.status}`);
+    deployed = await pollUntil(taskId, (t) => t.status === 'deployed' || t.status === 'error', { timeoutMs: 15000 });
+    ok(`task reached "${deployed.task.status}" before accept`);
   } catch (err) {
     bad(`task never reached terminal state: ${err.message}`);
-    return;
+    process.exit(1);
   }
 
-  // We don't assert on "queued" via polling: by the time the first poll fires
-  // the pipeline has already moved on. "queued" is verified directly from the
-  // POST /generate response above.
-  const seen = new Set([...intermediate.seenStatuses, ...final.seenStatuses]);
-  for (const expected of ['generating', 'building', 'deploying', 'pushing', 'deployed']) {
-    if (seen.has(expected)) ok(`saw status "${expected}"`);
-    else bad(`never saw status "${expected}" (saw: ${[...seen].join(', ')})`);
+  if (deployed.task.status !== 'deployed') {
+    bad(`expected "deployed", got "${deployed.task.status}". Aborting.`);
+    process.exit(1);
   }
 
-  const t = final.task;
-  if (typeof t.previewUrl === 'string' && t.previewUrl.length > 0) ok('previewUrl set');
+  const seenBeforeAccept = new Set([...intermediate.seenStatuses, ...deployed.seenStatuses]);
+  for (const expected of ['generating', 'building', 'deploying', 'deployed']) {
+    if (seenBeforeAccept.has(expected)) ok(`saw status "${expected}"`);
+    else bad(`never saw status "${expected}" (saw: ${[...seenBeforeAccept].join(', ')})`);
+  }
+
+  const t = deployed.task;
+  if (typeof t.previewUrl === 'string' && t.previewUrl.length > 0) ok('previewUrl set after deploy');
   else bad(`previewUrl missing: ${t.previewUrl}`);
-  if (typeof t.repoUrl === 'string' && t.repoUrl.length > 0) ok('repoUrl set');
-  else bad(`repoUrl missing: ${t.repoUrl}`);
-  if (typeof t.branch === 'string' && t.branch.startsWith('ai/')) ok('branch named ai/...');
-  else bad(`branch wrong: ${t.branch}`);
-  if (typeof t.intellijUrl === 'string' && t.intellijUrl.startsWith('jetbrains://')) ok('intellijUrl deep link present');
-  else bad(`intellijUrl missing: ${t.intellijUrl}`);
+  if (typeof t.projectPath === 'string' && t.projectPath.length > 0) ok('projectPath persisted on the task');
+  else bad(`projectPath missing: ${t.projectPath}`);
+  if (t.repoUrl === null) ok('repoUrl null before accept');
+  else bad(`repoUrl set too early: ${t.repoUrl}`);
   if (t.error === null) ok('error is null on success');
   else bad(`error not null: ${t.error}`);
 
@@ -116,11 +116,33 @@ async function pollUntil(taskId, predicate, { timeoutMs = 15000, intervalMs = 25
     'Generating code',
     'Building project',
     'Deploying preview',
-    'Pushing to GitHub',
-    'Done',
+    'Ready for acceptance',
   ]) {
     if (t.logs.includes(expectedLog)) ok(`log contains "${expectedLog}"`);
     else bad(`log missing "${expectedLog}"`);
+  }
+
+  header('happy path: POST /task/:id/accept -> accepted (mock github)');
+
+  const accept = await fetchJson('POST', `/task/${taskId}/accept`, {});
+  if (accept.status !== 200) {
+    bad(`POST /accept returned ${accept.status}: ${JSON.stringify(accept.json)}`);
+  } else {
+    ok('POST /accept returns 200');
+  }
+
+  if (accept.json?.status === 'accepted') ok('task status is "accepted"');
+  else bad(`expected "accepted", got ${accept.json?.status}`);
+  if (typeof accept.json?.repoUrl === 'string') ok('repoUrl set after accept');
+  else bad('repoUrl missing after accept');
+  if (typeof accept.json?.branch === 'string') ok('branch set after accept');
+  else bad('branch missing after accept');
+  if (typeof accept.json?.branchUrl === 'string') ok('branchUrl set after accept');
+  else bad('branchUrl missing after accept');
+  if (typeof accept.json?.intellijUrl === 'string' && accept.json.intellijUrl.startsWith('jetbrains://')) {
+    ok('intellijUrl is a JetBrains deep link');
+  } else {
+    bad(`intellijUrl missing or wrong: ${accept.json?.intellijUrl}`);
   }
 
   header('error path end-to-end (forced generator failure)');

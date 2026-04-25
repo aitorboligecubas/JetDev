@@ -65,6 +65,7 @@ router.post('/task/:taskId/accept', async (req, res, next) => {
         repoUrl: gitResult.repoUrl,
         branch: gitResult.branch,
         branchUrl: gitResult.branchUrl,
+        intellijUrl: gitResult.intellijUrl ?? null,
       });
       addLog(taskId, 'Accepted');
       return res.json(updated);
