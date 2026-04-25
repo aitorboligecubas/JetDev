@@ -22,6 +22,7 @@ const fs = require("fs");
 const path = require("path");
 const http = require("http");
 const net = require("net");
+const os = require("node:os");
 const { execSync, spawnSync } = require("child_process");
 
 // Load .env from generator folder
@@ -210,6 +211,18 @@ function buildProject(projectPath) {
 // STEP 5 — Deploy preview (static server on random port)
 // =============================================================================
 
+function getLanIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "localhost";
+}
+
 function getRandomPort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -232,7 +245,7 @@ async function deployPreview(projectPath, taskId) {
   return new Promise((resolve, reject) => {
     server.listen(port, "0.0.0.0", () => {
       _previews.set(taskId, server);
-      resolve(`http://localhost:${port}`);
+      resolve(`http://${getLanIP()}:${port}`);
     });
     server.on("error", (err) => reject(new Error(`Server failed: ${err.message}`)));
   });
@@ -247,6 +260,7 @@ async function deployPreview(projectPath, taskId) {
  */
 async function generateProject({ prompt, taskId }) {
   if (!prompt || !taskId) throw new Error("prompt & taskId required");
+  if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not set in generator/.env");
 
   console.log(`\n☁️  JetDev Generator — Task: ${taskId}`);
   console.log(`📝 Prompt: "${prompt}"\n`);
@@ -306,5 +320,8 @@ function stopAllPreviews() {
   }
   _previews.clear();
 }
+
+process.on("SIGINT", () => { stopAllPreviews(); process.exit(0); });
+process.on("SIGTERM", () => { stopAllPreviews(); process.exit(0); });
 
 module.exports = { generateProject, stopPreview, stopAllPreviews };
