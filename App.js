@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ToastProvider } from './src/components/Toast';
+import { Zap } from 'lucide-react-native';
 
 import IssuesScreen from './src/screens/IssuesScreen';
 import BoardScreen from './src/screens/BoardScreen';
@@ -49,6 +50,10 @@ function MainTabs() {
           const color = route.name === 'JetDev'
             ? (focused ? '#FF318C' : '#ABABAB')
             : (focused ? '#0060FF' : '#ABABAB');
+          
+          if (route.name === 'JetDev') {
+             return <Zap size={22} color={color} strokeWidth={focused ? 2.5 : 2} fill="none" />;
+          }
           return <Ionicons name={iconName} size={22} color={color} />;
         },
         tabBarActiveTintColor: '#0060FF',
