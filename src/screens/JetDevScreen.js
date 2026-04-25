@@ -3,6 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { useToast } from '../components/Toast';
 import { JB, Type, Colors } from '../constants/theme';
 import { quickPrompts } from '../constants/data';
@@ -89,6 +90,25 @@ const useStableId = (prefix) => {
   };
 };
 
+const GradientText = ({ text, style, colors = ['#FF318C', '#7B52FF'], width = 140, height = 20 }) => {
+  return (
+    <MaskedView
+      maskElement={
+        <Text style={style} numberOfLines={1}>
+          {text}
+        </Text>
+      }
+    >
+      <LinearGradient
+        colors={colors}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{ width, height }}
+      />
+    </MaskedView>
+  );
+};
+
 const SearchingDots = () => {
   const dot1 = useRef(new RNAnimated.Value(0.15)).current;
   const dot2 = useRef(new RNAnimated.Value(0.15)).current;
@@ -118,9 +138,15 @@ const SearchingDots = () => {
 
   return (
     <View style={styles.activityDotsRow}>
-      <RNAnimated.View style={[styles.activityDot, { opacity: dot1 }]} />
-      <RNAnimated.View style={[styles.activityDot, { opacity: dot2 }]} />
-      <RNAnimated.View style={[styles.activityDot, { opacity: dot3 }]} />
+      <RNAnimated.View style={[styles.activityDotWrap, { opacity: dot1 }]}>
+        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activityDotGrad} />
+      </RNAnimated.View>
+      <RNAnimated.View style={[styles.activityDotWrap, { opacity: dot2 }]}>
+        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activityDotGrad} />
+      </RNAnimated.View>
+      <RNAnimated.View style={[styles.activityDotWrap, { opacity: dot3 }]}>
+        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.activityDotGrad} />
+      </RNAnimated.View>
     </View>
   );
 };
@@ -153,6 +179,8 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
     }
   }, [status, labelOpacity, searchingOpacity, valueOpacity]);
 
+  const isSuccessValue = doneColor !== '#19191C';
+
   return (
     <RNAnimated.View style={[styles.activityRowWrap, { opacity: entryOpacity, transform: [{ translateX: entryX }] }]}>
       <View style={styles.activityRow}>
@@ -166,9 +194,13 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
             <SearchingDots />
           </RNAnimated.View>
 
-          <RNAnimated.Text style={[styles.activityValue, { opacity: valueOpacity, color: doneColor }]}>
-            {doneValue}
-          </RNAnimated.Text>
+          <RNAnimated.View style={{ opacity: valueOpacity }}>
+            {isSuccessValue ? (
+              <GradientText text={doneValue} style={styles.activityValueGradientMask} width={120} height={20} />
+            ) : (
+              <Text style={[styles.activityValue, { color: doneColor }]}>{doneValue}</Text>
+            )}
+          </RNAnimated.View>
         </View>
       </View>
     </RNAnimated.View>
@@ -198,14 +230,16 @@ const JunieDotPulse = ({ delay = 0 }) => {
   }, [delay, opacity, scale]);
 
   return (
-    <RNAnimated.View style={[styles.thinkingDot, { opacity, transform: [{ scale }] }]} />
+    <RNAnimated.View style={[styles.thinkingDotWrap, { opacity, transform: [{ scale }] }]}>
+      <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.thinkingDotGrad} />
+    </RNAnimated.View>
   );
 };
 
 const JunieLabel = () => (
   <View style={styles.junieLabelRow}>
     <Zap size={11} color="#FF318C" strokeWidth={2.4} />
-    <Text style={styles.junieLabelText}>Junie</Text>
+    <GradientText text="Junie" style={styles.junieLabelText} width={54} height={14} />
   </View>
 );
 
@@ -312,33 +346,41 @@ const QuestionCard = ({ question, options, onAnswer }) => {
 
   return (
     <RNAnimated.View style={[styles.questionWrap, { opacity: RNAnimated.multiply(entryOpacity, exitOpacity), transform: [{ translateY: RNAnimated.add(entryY, exitY) }] }]}>
-      <View style={styles.questionCard}>
-        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.questionAccentLine} />
-        <View style={styles.questionInner}>
-          <Text style={styles.questionLabel}>⚡ JUNIE</Text>
-          <Text style={styles.questionText}>{question}</Text>
+      <View style={styles.qBorderWrap}>
+        <LinearGradient
+          colors={['#FF318C', '#7B52FF', '#FF318C']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.qInnerCard}>
+          <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.questionAccentLine} />
+          <View style={styles.questionInner}>
+            <GradientText text="⚡ JUNIE" style={styles.questionLabel} width={84} height={14} />
+            <Text style={styles.questionText}>{question}</Text>
 
-          <View style={styles.questionOptionsCol}>
-            {options.map((opt, idx) => {
-              const Icon = opt.icon;
-              const isSelected = selectedIdx === idx;
-              return (
-                <RNAnimated.View key={opt.text} style={{ transform: [{ scale: isSelected ? pressedScale : 1 }] }}>
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => handleSelect(idx)}
-                    style={[
-                      styles.questionOptionBtn,
-                      isSelected && styles.questionOptionBtnSelected
-                    ]}
-                    disabled={selectedIdx !== null}
-                  >
-                    <Icon size={16} color="rgba(255,255,255,0.65)" />
-                    <Text style={styles.questionOptionText}>{opt.text}</Text>
-                  </TouchableOpacity>
-                </RNAnimated.View>
-              );
-            })}
+            <View style={styles.questionOptionsCol}>
+              {options.map((opt, idx) => {
+                const Icon = opt.icon;
+                const isSelected = selectedIdx === idx;
+                return (
+                  <RNAnimated.View key={opt.text} style={{ transform: [{ scale: isSelected ? pressedScale : 1 }] }}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => handleSelect(idx)}
+                      style={[
+                        styles.questionOptionBtn,
+                        isSelected && styles.questionOptionBtnSelected
+                      ]}
+                      disabled={selectedIdx !== null}
+                    >
+                      <Icon size={16} color="rgba(25,25,28,0.55)" />
+                      <Text style={styles.questionOptionText}>{opt.text}</Text>
+                    </TouchableOpacity>
+                  </RNAnimated.View>
+                );
+              })}
+            </View>
           </View>
         </View>
       </View>
@@ -417,6 +459,8 @@ export default function JetDevScreen() {
 
   const sendBg = useRef(new RNAnimated.Value(0)).current;
   const sendScale = useRef(new RNAnimated.Value(1)).current;
+  const shimmerAnim = useRef(new RNAnimated.Value(0)).current;
+  const shimmerWidthRef = useRef(0);
   
   const showToast = useToast();
   const stateRef = useRef(state);
@@ -456,6 +500,19 @@ export default function JetDevScreen() {
         useNativeDriver: false,
       }).start();
 
+      // shimmer loop (visual only)
+      shimmerAnim.stopAnimation();
+      shimmerAnim.setValue(0);
+      const shimmerLoop = RNAnimated.loop(
+        RNAnimated.timing(shimmerAnim, {
+          toValue: 1,
+          duration: 1400,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      shimmerLoop.start();
+
       // clear any previous timers
       genTimers.current.forEach(t => clearTimeout(t));
       genTimers.current = [];
@@ -480,7 +537,7 @@ export default function JetDevScreen() {
       const a7 = makeId();
 
       schedule(0, () => {
-        addItem({ id: a1, kind: 'activity', label: 'Parsing your prompt', status: 'searching', doneValue: 'Node.js', doneColor: '#FFFFFF' });
+        addItem({ id: a1, kind: 'activity', label: 'Parsing your prompt', status: 'searching', doneValue: 'Node.js', doneColor: '#19191C' });
       });
 
       schedule(900, () => {
@@ -551,7 +608,7 @@ export default function JetDevScreen() {
 
       schedule(10500, () => {
         setCurrentStep(2);
-        addItem({ id: a6, kind: 'activity', label: 'Provisioning server', status: 'searching', doneValue: 'us-east-1', doneColor: '#FFFFFF' });
+        addItem({ id: a6, kind: 'activity', label: 'Provisioning server', status: 'searching', doneValue: 'us-east-1', doneColor: '#19191C' });
       });
 
       schedule(11500, () => {
@@ -579,6 +636,9 @@ export default function JetDevScreen() {
       });
 
       return () => {
+        shimmerLoop.stop();
+        shimmerAnim.stopAnimation();
+        shimmerAnim.setValue(0);
         genTimers.current.forEach(t => clearTimeout(t));
         genTimers.current = [];
       };
@@ -743,9 +803,19 @@ export default function JetDevScreen() {
       {/* FULLSCREEN GENERATING MODAL */}
       <SlideUpModal visible={isExpanded}>
         <JetDevHeroGradient isFullscreen={true}>
+          {/* White base + subtle tint overlay */}
+          <View pointerEvents="none" style={styles.genWhiteBase} />
+          <LinearGradient
+            pointerEvents="none"
+            colors={['rgba(255,49,140,0.04)', 'rgba(123,82,255,0.06)', 'rgba(255,255,255,0)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.genTintOverlay}
+          />
+
           <View style={[styles.genHeader, { paddingTop: insets.top + 16 }]}>
             <TouchableOpacity onPress={handleDiscard} style={styles.genCloseBtn}>
-              <X size={16} color="#FFF" />
+              <X size={16} color="#19191C" />
             </TouchableOpacity>
             <Text style={styles.genProjectName}>Restaurant Booking API</Text>
             <View style={styles.genStackTag}>
@@ -785,14 +855,39 @@ export default function JetDevScreen() {
           </View>
 
           {/* PROGRESS BAR */}
-          <View style={styles.genProgressTrack}>
+          <View
+            style={styles.genProgressTrack}
+            onLayout={(e) => {
+              shimmerWidthRef.current = e.nativeEvent.layout.width;
+            }}
+          >
             <RNAnimated.View
               style={[
                 styles.genProgressFillWrap,
                 { width: genProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }
               ]}
             >
-              <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.genProgressFill} />
+              <RNAnimated.View
+                style={{
+                  width: '200%',
+                  height: '100%',
+                  transform: [
+                    {
+                      translateX: shimmerAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-(shimmerWidthRef.current || 200) / 2, 0],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <LinearGradient
+                  colors={['#FF318C', '#7B52FF', '#FF318C']}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={styles.genProgressFill}
+                />
+              </RNAnimated.View>
             </RNAnimated.View>
           </View>
 
@@ -845,14 +940,14 @@ export default function JetDevScreen() {
           <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
             <View style={styles.inputRow}>
               <TouchableOpacity style={styles.inputIconBtn} activeOpacity={0.85}>
-                <Plus size={18} color="rgba(255,255,255,0.65)" />
+                <Plus size={18} color="rgba(25,25,28,0.55)" />
               </TouchableOpacity>
 
               <TextInput
                 value={genInput}
                 onChangeText={setGenInput}
                 placeholder="Ask Junie anything..."
-                placeholderTextColor="rgba(255,255,255,0.3)"
+                placeholderTextColor="rgba(25,25,28,0.35)"
                 style={styles.inputText}
                 multiline
                 maxHeight={80}
@@ -862,14 +957,14 @@ export default function JetDevScreen() {
                 style={[
                   styles.sendBtn,
                   {
-                    backgroundColor: sendBg.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['rgba(255,255,255,0.09)', '#FF318C'],
-                    }),
                     transform: [{ scale: sendScale }],
                   }
                 ]}
               >
+                <View pointerEvents="none" style={styles.sendBtnBaseBg} />
+                <RNAnimated.View pointerEvents="none" style={[styles.sendBtnGradWrap, { opacity: sendBg }]}>
+                  <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sendBtnGrad} />
+                </RNAnimated.View>
                 <TouchableOpacity
                   style={styles.sendBtnPressable}
                   activeOpacity={0.85}
@@ -878,7 +973,7 @@ export default function JetDevScreen() {
                   {hasSendText ? (
                     <ArrowUp size={18} color="#FFFFFF" />
                   ) : (
-                    <Mic size={18} color="rgba(255,255,255,0.55)" />
+                    <Mic size={18} color="rgba(25,25,28,0.45)" />
                   )}
                 </TouchableOpacity>
               </RNAnimated.View>
@@ -1057,10 +1152,13 @@ const styles = StyleSheet.create({
 
   /* Fullscreen Generating State */
   genHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 16 },
-  genCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
-  genProjectName: { color: '#FFF', fontSize: 17, fontWeight: '700' },
-  genStackTag: { backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  genStackTagText: { color: '#FFF', fontSize: 11, fontWeight: '600' },
+  genCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.04)', borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center' },
+  genProjectName: { color: '#19191C', fontSize: 17, fontWeight: '700' },
+  genStackTag: { backgroundColor: 'rgba(0,0,0,0.035)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  genStackTagText: { color: 'rgba(25,25,28,0.9)', fontSize: 11, fontWeight: '700' },
+
+  genWhiteBase: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFFFFF' },
+  genTintOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
   genStepper: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginHorizontal: 20, marginTop: 20, marginBottom: 12 },
   genStepItem: { alignItems: 'center', flex: 1 },
@@ -1069,13 +1167,13 @@ const styles = StyleSheet.create({
   genActiveCircle: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#0060FF', position: 'absolute' },
   pulsingRing: { position: 'absolute', width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0, 96, 255, 0.4)', zIndex: 1 },
   genStepPending: { width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'transparent', zIndex: 2 },
-  genStepLine: { position: 'absolute', left: '50%', right: '-50%', height: 2, backgroundColor: 'rgba(255,255,255,0.15)', zIndex: 1 },
+  genStepLine: { position: 'absolute', left: '50%', right: '-50%', height: 2, backgroundColor: 'rgba(0,0,0,0.10)', zIndex: 1 },
   genStepLineDone: { backgroundColor: JB.success },
-  genStepText: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: '500' },
+  genStepText: { fontSize: 13, color: 'rgba(25,25,28,0.45)', fontWeight: '600' },
   genStepTextDone: { color: JB.success, fontWeight: '600' },
-  genStepTextActive: { color: '#FFF', fontWeight: '700' },
+  genStepTextActive: { color: '#19191C', fontWeight: '800' },
 
-  genProgressTrack: { width: '100%', height: 3, backgroundColor: 'rgba(255,255,255,0.08)' },
+  genProgressTrack: { width: '100%', height: 3, backgroundColor: '#F0F0F0', overflow: 'hidden' },
   genProgressFillWrap: { height: '100%' },
   genProgressFill: { width: '100%', height: '100%' },
 
@@ -1090,28 +1188,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 13,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.07)',
+    borderBottomColor: 'rgba(0,0,0,0.06)',
   },
-  activityLabel: { fontSize: 15, color: '#FFFFFF' },
+  activityLabel: { fontSize: 15, color: '#19191C' },
   activityLabelActive: { fontWeight: '500' },
   activityLabelDone: { fontWeight: '400' },
   activityRight: { alignItems: 'flex-end', minHeight: 18, justifyContent: 'center' },
   activitySearchingWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  activitySearchingText: { fontSize: 13, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' },
+  activitySearchingText: { fontSize: 13, color: 'rgba(25,25,28,0.45)', fontStyle: 'italic' },
   activityDotsRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  activityDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#FF318C' },
+  activityDotWrap: { width: 5, height: 5, borderRadius: 2.5, overflow: 'hidden' },
+  activityDotGrad: { width: '100%', height: '100%' },
   activityValue: { fontSize: 14, fontWeight: '600' },
+  activityValueGradientMask: { fontSize: 14, fontWeight: '700', color: '#000' },
 
   junieBlock: { width: '100%', marginTop: 10 },
   junieLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5, marginLeft: 20 },
-  junieLabelText: { fontSize: 11, fontWeight: '700', color: '#FF318C', letterSpacing: 0.8 },
+  junieLabelText: { fontSize: 11, fontWeight: '800', color: '#000', letterSpacing: 0.8 },
   junieBubble: {
     alignSelf: 'flex-start',
     marginHorizontal: 20,
     maxWidth: '82%',
-    backgroundColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(25,25,28,0.035)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(25,25,28,0.08)',
     borderTopLeftRadius: 4,
     borderTopRightRadius: 16,
     borderBottomRightRadius: 16,
@@ -1120,17 +1220,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 6,
   },
-  junieText: { fontSize: 14, color: '#FFFFFF', lineHeight: 21 },
+  junieText: { fontSize: 14, color: '#19191C', lineHeight: 21 },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 4 },
-  thinkingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF318C' },
+  thinkingDotWrap: { width: 8, height: 8, borderRadius: 4, overflow: 'hidden' },
+  thinkingDotGrad: { width: '100%', height: '100%' },
 
   userBubble: {
     alignSelf: 'flex-end',
     marginHorizontal: 20,
     maxWidth: '72%',
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(25,25,28,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
+    borderColor: 'rgba(25,25,28,0.10)',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 4,
     borderBottomRightRadius: 16,
@@ -1139,27 +1240,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 6,
   },
-  userText: { fontSize: 14, color: '#FFFFFF' },
+  userText: { fontSize: 14, color: '#19191C' },
 
   questionWrap: { width: '100%' },
-  questionCard: {
-    marginHorizontal: 16,
-    marginVertical: 8,
-    backgroundColor: 'rgba(12, 4, 30, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 49, 140, 0.4)',
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
+  qBorderWrap: { marginHorizontal: 16, marginVertical: 8, padding: 1.5, borderRadius: 19, overflow: 'hidden' },
+  qInnerCard: { backgroundColor: '#FAFAFA', borderRadius: 18, overflow: 'hidden' },
   questionAccentLine: { height: 2, width: '100%' },
   questionInner: { padding: 16 },
-  questionLabel: { fontSize: 10, fontWeight: '800', color: '#FF318C', letterSpacing: 1.4, marginBottom: 10 },
-  questionText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', lineHeight: 23, marginBottom: 16 },
+  questionLabel: { fontSize: 10, fontWeight: '800', color: '#000', letterSpacing: 1.4, marginBottom: 10 },
+  questionText: { fontSize: 16, fontWeight: '700', color: '#19191C', lineHeight: 23, marginBottom: 16 },
   questionOptionsCol: { gap: 8 },
   questionOptionBtn: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(0,0,0,0.03)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 13,
@@ -1167,8 +1261,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  questionOptionBtnSelected: { borderColor: '#FF318C', backgroundColor: 'rgba(255,49,140,0.14)' },
-  questionOptionText: { fontSize: 14, fontWeight: '500', color: '#FFFFFF' },
+  questionOptionBtnSelected: { borderColor: '#FF318C', backgroundColor: 'rgba(255,49,140,0.10)' },
+  questionOptionText: { fontSize: 14, fontWeight: '500', color: '#19191C' },
 
   inputBar: {
     position: 'absolute',
@@ -1177,31 +1271,31 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 16,
     paddingTop: 10,
-    backgroundColor: 'rgba(8, 3, 20, 0.88)',
+    backgroundColor: 'rgba(255,255,255,0.82)',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopColor: 'rgba(0,0,0,0.08)',
   },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
   inputIconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: 'rgba(0,0,0,0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(0,0,0,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   inputText: {
     flex: 1,
     marginHorizontal: 10,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(0,0,0,0.03)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.13)',
+    borderColor: 'rgba(0,0,0,0.08)',
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    color: '#FFFFFF',
+    color: '#19191C',
     fontSize: 14,
   },
   sendBtn: {
@@ -1210,7 +1304,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  sendBtnBaseBg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.04)' },
+  sendBtnGradWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  sendBtnGrad: { width: '100%', height: '100%' },
   sendBtnPressable: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
 
   /* Preview State */
