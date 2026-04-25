@@ -43,6 +43,14 @@ export async function runPipeline(taskId) {
     const generation = await generateProject({
       prompt: initial.prompt,
       taskId,
+      onFeedEvent: (evt) => {
+        if (!evt || typeof evt !== 'object') return;
+        const key = typeof evt.key === 'string' ? evt.key : 'step';
+        const phase = typeof evt.phase === 'string' ? evt.phase : 'update';
+        const label = typeof evt.label === 'string' ? evt.label : '';
+        const value = typeof evt.value === 'string' ? evt.value : '';
+        addLog(taskId, `FEED|${key}|${phase}|${label}|${value}`);
+      },
     });
     if (!generation || !generation.projectPath || !generation.previewUrl) {
       throw new Error('generateProject returned an invalid result');
