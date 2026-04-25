@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import MaskedView from '@react-native-masked-view/masked-view';
+import { WebView } from 'react-native-webview';
 import { useToast } from '../components/Toast';
 import { JB, Type, Colors } from '../constants/theme';
 import { quickPrompts } from '../constants/data';
@@ -13,12 +14,13 @@ import {
   TriangleAlert, Clock, Copy,
   ChevronRight, History, Layers,
   CircleCheck, Sparkles, X,
-  Trash2, Lock, Mail, BellOff,
+  Trash2, Lock, Mail, BellOff, Bell, FileCode,
   FolderOpen, Server, Code2, ExternalLink,
   Plus, Mic, ArrowUp
 } from 'lucide-react-native';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const MONO_FONT = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 const historyProjects = [
   { id: 1, name: 'Restaurant Booking API', stack: 'Node.js', time: '3 days ago', url: 'github.com/JetDev-Team/rest-api', status: 'live' },
@@ -26,6 +28,30 @@ const historyProjects = [
   { id: 3, name: 'Portfolio Site', stack: 'React', time: '2 weeks ago', url: 'github.com/JetDev-Team/portfolio', status: 'live' },
   { id: 4, name: 'Auth Service', stack: 'Node.js', time: '1 month ago', url: 'github.com/JetDev-Team/auth-service', status: 'offline' },
 ];
+
+const previewNextSteps = [
+  { label: 'Add authentication (JWT)' },
+  { label: 'Connect database' },
+  { label: 'Add validation' },
+];
+
+const previewLogs = [
+  { time: '0.1s', message: 'Parsing prompt with Junie AI...', type: 'info' },
+  { time: '0.8s', message: 'Detected stack: Node.js + Express + PostgreSQL', type: 'info' },
+  { time: '2.5s', message: 'Writing route handlers (4 endpoints)...', type: 'info' },
+  { time: '4.1s', message: 'Generating DB schema (3 tables)...', type: 'info' },
+  { time: '8.4s', message: 'Running health check... 200 OK (12ms)', type: 'success' },
+];
+
+const previewFiles = [
+  { path: 'src/index.js', status: 'created' },
+  { path: 'src/routes/bookings.js', status: 'created' },
+  { path: 'src/routes/users.js', status: 'created' },
+  { path: 'prisma/schema.prisma', status: 'modified' },
+  { path: 'package.json', status: 'modified' },
+];
+
+const deployedUrl = 'https://restaurant-api.jetdev.app';
 
 const ProjectCard = ({ proj }) => {
   const isLive = proj.status === 'active' || proj.status === 'live';
@@ -168,7 +194,7 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
 
   useEffect(() => {
     if (status === 'done') {
-      RNAnimated.timing(labelOpacity, { toValue: 0.4, duration: 300, useNativeDriver: true }).start();
+      RNAnimated.timing(labelOpacity, { toValue: 0.32, duration: 300, useNativeDriver: true }).start();
       RNAnimated.timing(searchingOpacity, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => {
         RNAnimated.timing(valueOpacity, { toValue: 1, duration: 280, delay: 100, useNativeDriver: true }).start();
       });
@@ -179,7 +205,9 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
     }
   }, [status, labelOpacity, searchingOpacity, valueOpacity]);
 
-  const isSuccessValue = doneColor !== '#19191C';
+  const isNeutralValue = doneValue === 'Node.js';
+  const isSuccessValue = !isNeutralValue;
+  const isSearching = status !== 'done';
 
   return (
     <RNAnimated.View style={[styles.activityRowWrap, { opacity: entryOpacity, transform: [{ translateX: entryX }] }]}>
@@ -189,18 +217,35 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
         </RNAnimated.Text>
 
         <View style={styles.activityRight}>
-          <RNAnimated.View style={[styles.activitySearchingWrap, { opacity: searchingOpacity }]}>
-            <Text style={styles.activitySearchingText}>Searching</Text>
-            <SearchingDots />
-          </RNAnimated.View>
-
-          <RNAnimated.View style={{ opacity: valueOpacity }}>
-            {isSuccessValue ? (
-              <GradientText text={doneValue} style={styles.activityValueGradientMask} width={120} height={20} />
-            ) : (
-              <Text style={[styles.activityValue, { color: doneColor }]}>{doneValue}</Text>
-            )}
-          </RNAnimated.View>
+          {status === 'done' && isSuccessValue ? (
+            <RNAnimated.View style={{ opacity: valueOpacity }}>
+              <MaskedView
+                maskElement={
+                  <Text style={styles.activityValueGradientMask} numberOfLines={1}>
+                    {doneValue}
+                  </Text>
+                }
+              >
+                <LinearGradient
+                  colors={['#FF318C', '#7B52FF']}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={{ height: 20, minWidth: 80 }}
+                />
+              </MaskedView>
+            </RNAnimated.View>
+          ) : status === 'done' && isNeutralValue ? (
+            <RNAnimated.View style={{ opacity: valueOpacity }}>
+              <Text style={styles.activityValueNeutral} numberOfLines={1}>
+                {doneValue}
+              </Text>
+            </RNAnimated.View>
+          ) : isSearching ? (
+            <RNAnimated.View style={[styles.activitySearchingWrap, { opacity: searchingOpacity }]}>
+              <Text style={styles.activitySearchingText}>Searching</Text>
+              <SearchingDots />
+            </RNAnimated.View>
+          ) : null}
         </View>
       </View>
     </RNAnimated.View>
@@ -239,7 +284,7 @@ const JunieDotPulse = ({ delay = 0 }) => {
 const JunieLabel = () => (
   <View style={styles.junieLabelRow}>
     <Zap size={11} color="#FF318C" strokeWidth={2.4} />
-    <GradientText text="Junie" style={styles.junieLabelText} width={54} height={14} />
+    <Text style={styles.junieLabelText}>JUNIE</Text>
   </View>
 );
 
@@ -263,7 +308,7 @@ const JunieMessage = ({ text, thinkingMs = 1200 }) => {
     <View style={styles.junieBlock}>
       <JunieLabel />
 
-      <RNAnimated.View style={[styles.junieBubble, { opacity: thinkingOpacity }]}>
+      <RNAnimated.View style={[styles.junieBubble, styles.thinkingBubble, { opacity: thinkingOpacity }]}>
         <View style={styles.thinkingRow}>
           <JunieDotPulse delay={0} />
           <JunieDotPulse delay={200} />
@@ -290,8 +335,11 @@ const UserMessage = ({ text }) => {
   }, [opacity, y]);
 
   return (
-    <RNAnimated.View style={[styles.userBubble, { opacity, transform: [{ translateY: y }] }]}>
-      <Text style={styles.userText}>{text}</Text>
+    <RNAnimated.View style={[styles.userBubbleOuter, { opacity, transform: [{ translateY: y }] }]}>
+      <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.userBubbleGradFill} />
+      <View style={styles.userBubbleInner}>
+        <Text style={styles.userText}>{text}</Text>
+      </View>
     </RNAnimated.View>
   );
 };
@@ -347,40 +395,38 @@ const QuestionCard = ({ question, options, onAnswer }) => {
   return (
     <RNAnimated.View style={[styles.questionWrap, { opacity: RNAnimated.multiply(entryOpacity, exitOpacity), transform: [{ translateY: RNAnimated.add(entryY, exitY) }] }]}>
       <View style={styles.qBorderWrap}>
-        <LinearGradient
-          colors={['#FF318C', '#7B52FF', '#FF318C']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
+        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.qBorderGrad} />
         <View style={styles.qInnerCard}>
-          <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.questionAccentLine} />
-          <View style={styles.questionInner}>
-            <GradientText text="⚡ JUNIE" style={styles.questionLabel} width={84} height={14} />
-            <Text style={styles.questionText}>{question}</Text>
+          <View style={styles.qHeaderRow}>
+            <Svg width={10} height={14} viewBox="0 0 10 14">
+              <Path d="M6 0L0 8h4.5L4 14l6-8H5.5L6 0z" fill="#FF318C" />
+            </Svg>
+            <Text style={styles.qHeaderText}>Junie</Text>
+          </View>
 
-            <View style={styles.questionOptionsCol}>
-              {options.map((opt, idx) => {
-                const Icon = opt.icon;
-                const isSelected = selectedIdx === idx;
-                return (
-                  <RNAnimated.View key={opt.text} style={{ transform: [{ scale: isSelected ? pressedScale : 1 }] }}>
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => handleSelect(idx)}
-                      style={[
-                        styles.questionOptionBtn,
-                        isSelected && styles.questionOptionBtnSelected
-                      ]}
-                      disabled={selectedIdx !== null}
-                    >
-                      <Icon size={16} color="rgba(25,25,28,0.55)" />
-                      <Text style={styles.questionOptionText}>{opt.text}</Text>
-                    </TouchableOpacity>
-                  </RNAnimated.View>
-                );
-              })}
-            </View>
+          <Text style={styles.questionText}>{question}</Text>
+
+          <View style={styles.questionOptionsCol}>
+            {options.map((opt, idx) => {
+              const Icon = opt.icon;
+              const isSelected = selectedIdx === idx;
+              return (
+                <RNAnimated.View key={opt.text} style={{ transform: [{ scale: isSelected ? pressedScale : 1 }] }}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => handleSelect(idx)}
+                    style={[
+                      styles.questionOptionBtn,
+                      isSelected && styles.questionOptionBtnSelected
+                    ]}
+                    disabled={selectedIdx !== null}
+                  >
+                    <Icon size={16} color={isSelected ? '#FF318C' : '#ABABAB'} />
+                    <Text style={[styles.questionOptionText, isSelected && styles.questionOptionTextSelected]}>{opt.text}</Text>
+                  </TouchableOpacity>
+                </RNAnimated.View>
+              );
+            })}
           </View>
         </View>
       </View>
@@ -451,6 +497,7 @@ export default function JetDevScreen() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [genFeed, setGenFeed] = useState([]);
   const [genInput, setGenInput] = useState('');
+  const [genModalTab, setGenModalTab] = useState('Preview');
 
   const genScrollRef = useRef(null);
   const genProgress = useRef(new RNAnimated.Value(0)).current;
@@ -461,6 +508,9 @@ export default function JetDevScreen() {
   const sendScale = useRef(new RNAnimated.Value(1)).current;
   const shimmerAnim = useRef(new RNAnimated.Value(0)).current;
   const shimmerWidthRef = useRef(0);
+
+  const livePulseScale = useRef(new RNAnimated.Value(1)).current;
+  const livePulseOpacity = useRef(new RNAnimated.Value(0)).current;
   
   const showToast = useToast();
   const stateRef = useRef(state);
@@ -490,6 +540,7 @@ export default function JetDevScreen() {
       setCurrentStep(0);
       setGenFeed([]);
       setGenInput('');
+      setGenModalTab('Preview');
       
       genProgress.stopAnimation();
       genProgress.setValue(0);
@@ -629,10 +680,7 @@ export default function JetDevScreen() {
       });
 
       schedule(13500, () => {
-        setIsExpanded(false);
-        setTimeout(() => {
-          if (stateRef.current === 'generating') setState('preview');
-        }, 300);
+        // Keep modal open; it switches to Preview content at currentStep === 3
       });
 
       return () => {
@@ -644,6 +692,27 @@ export default function JetDevScreen() {
       };
     }
   }, [state]);
+
+  useEffect(() => {
+    if (!isExpanded || currentStep !== 3) return;
+
+    livePulseScale.setValue(1);
+    livePulseOpacity.setValue(0.45);
+    const loop = RNAnimated.loop(
+      RNAnimated.parallel([
+        RNAnimated.timing(livePulseScale, { toValue: 1.8, duration: 1200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        RNAnimated.timing(livePulseOpacity, { toValue: 0, duration: 1200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      livePulseScale.stopAnimation();
+      livePulseOpacity.stopAnimation();
+      livePulseScale.setValue(1);
+      livePulseOpacity.setValue(0);
+    };
+  }, [currentStep, isExpanded, livePulseOpacity, livePulseScale]);
 
   useEffect(() => {
     if (!isExpanded) return;
@@ -706,7 +775,10 @@ export default function JetDevScreen() {
     setState('generating');
   };
 
-  const handleAccept = () => setState('success');
+  const handleAccept = () => {
+    setIsExpanded(false);
+    setTimeout(() => setState('success'), 250);
+  };
 
   const handleDiscard = () => {
     showToast('Environment discarded');
@@ -833,19 +905,28 @@ export default function JetDevScreen() {
                 <View key={step} style={styles.genStepItem}>
                   <View style={styles.genStepCircleRow}>
                     {isDone ? (
-                      <View style={styles.genStepIconWrap}>
-                        <CircleCheck size={26} color="#59A869" strokeWidth={2} fill="none" />
+                      <View style={styles.stepCircleDone}>
+                        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+                        <CircleCheck size={14} color="#FFFFFF" strokeWidth={3} />
                       </View>
                     ) : isActive ? (
-                      <View style={styles.genStepIconWrap}>
-                        <PulsingRing />
-                        <View style={styles.genActiveCircle} />
+                      <View style={styles.stepCircleActive}>
+                        <View style={styles.stepCircleActiveDot} />
                       </View>
                     ) : (
-                      <View style={styles.genStepPending} />
+                      <View style={styles.stepCirclePending} />
                     )}
                     {idx < stepperSteps.length - 1 && (
-                      <View style={[styles.genStepLine, isPast && styles.genStepLineDone]} />
+                      isPast ? (
+                        <LinearGradient
+                          colors={['#FF318C', '#7B52FF']}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                          style={styles.stepLineDone}
+                        />
+                      ) : (
+                        <View style={styles.stepLinePending} />
+                      )
                     )}
                   </View>
                   <Text style={[styles.genStepText, isDone && styles.genStepTextDone, isActive && !isDone && styles.genStepTextActive]}>{step}</Text>
@@ -854,131 +935,318 @@ export default function JetDevScreen() {
             })}
           </View>
 
-          {/* PROGRESS BAR */}
-          <View
-            style={styles.genProgressTrack}
-            onLayout={(e) => {
-              shimmerWidthRef.current = e.nativeEvent.layout.width;
-            }}
-          >
-            <RNAnimated.View
-              style={[
-                styles.genProgressFillWrap,
-                { width: genProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }
-              ]}
-            >
-              <RNAnimated.View
-                style={{
-                  width: '200%',
-                  height: '100%',
-                  transform: [
-                    {
-                      translateX: shimmerAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-(shimmerWidthRef.current || 200) / 2, 0],
-                      }),
-                    },
-                  ],
+          {currentStep === 3 ? (
+            <>
+              {/* STATUS BAR */}
+              <View style={styles.genStatusBar}>
+                <View style={styles.genLiveRow}>
+                  <View style={styles.genLiveDotWrap}>
+                    <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1 }} />
+                    <RNAnimated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.genLivePulseRing,
+                        {
+                          opacity: livePulseOpacity,
+                          transform: [{ scale: livePulseScale }],
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.genLiveText}>Live on AWS</Text>
+                </View>
+
+                <View style={styles.genStatusStackPill}>
+                  <Text style={styles.genStatusStackText}>Node.js + Express</Text>
+                </View>
+              </View>
+
+              {/* TABS */}
+              <View style={styles.genTabs}>
+                {['Preview', 'Logs', 'Files'].map((tab) => {
+                  const active = genModalTab === tab;
+                  return (
+                    <TouchableOpacity key={tab} onPress={() => setGenModalTab(tab)} style={styles.genTabBtn} activeOpacity={0.85}>
+                      <Text style={[styles.genTabText, active && styles.genTabTextActive]}>{tab}</Text>
+                      {active ? (
+                        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.genTabUnderline} />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* TAB CONTENT */}
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 28 + 110 }}
+                showsVerticalScrollIndicator={false}
+              >
+                {genModalTab === 'Preview' ? (
+                  <>
+                    <View style={styles.webViewCard}>
+                      <View style={styles.webChrome}>
+                        <View style={styles.chromeDot1} />
+                        <View style={styles.chromeDot2} />
+                        <View style={styles.chromeDot3} />
+
+                        <View style={styles.urlBar}>
+                          <Lock size={9} color="#8A8A8A" strokeWidth={2.6} />
+                          <Text style={styles.urlText} numberOfLines={1}>
+                            {deployedUrl.replace(/^https?:\/\//, '')}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {!!deployedUrl ? (
+                        <WebView
+                          source={{ uri: deployedUrl }}
+                          style={{ flex: 1 }}
+                          scrollEnabled={true}
+                          showsVerticalScrollIndicator={false}
+                          showsHorizontalScrollIndicator={false}
+                          startInLoadingState={true}
+                          renderLoading={() => (
+                            <View style={styles.webLoading}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <SearchingDots />
+                              </View>
+                            </View>
+                          )}
+                        />
+                      ) : (
+                        <View style={styles.webLoading} />
+                      )}
+                    </View>
+
+                    <View style={styles.nextStepsWrap}>
+                      <View style={styles.nextStepsHeader}>
+                        <Sparkles size={12} color="#7B52FF" />
+                        <Text style={styles.nextStepsTitle}>Next Steps</Text>
+                      </View>
+
+                      {previewNextSteps.map((s, i) => (
+                        <TouchableOpacity key={i} style={styles.nextStepRow} activeOpacity={0.85}>
+                          <View style={styles.nextStepAccent}>
+                            <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={{ flex: 1 }} />
+                          </View>
+                          <Text style={styles.nextStepLabel}>{s.label}</Text>
+                          <ChevronRight size={14} color="#D0D0D0" strokeWidth={2.5} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                ) : genModalTab === 'Logs' ? (
+                  <View style={styles.logsCard}>
+                    {previewLogs.map((log, i) => (
+                      <View key={i} style={styles.logRow}>
+                        <Text style={styles.logTime}>{log.time}</Text>
+                        <Text
+                          style={[
+                            styles.logMsg,
+                            log.type === 'error'
+                              ? { color: '#FF6B6B' }
+                              : log.type === 'success'
+                              ? { color: '#4ADE80' }
+                              : null,
+                          ]}
+                        >
+                          {log.message}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ paddingTop: 6 }}>
+                    {previewFiles.map((file, i) => (
+                      <View key={i} style={styles.fileRow}>
+                        <View style={styles.fileLeft}>
+                          <FileCode size={14} color="#ABABAB" />
+                          <Text style={styles.filePath} numberOfLines={1}>
+                            {file.path}
+                          </Text>
+                        </View>
+                        <View
+                          style={[
+                            styles.fileBadge,
+                            file.status === 'created'
+                              ? { backgroundColor: 'rgba(123,82,255,0.10)' }
+                              : file.status === 'modified'
+                              ? { backgroundColor: 'rgba(255,49,140,0.08)' }
+                              : { backgroundColor: 'rgba(0,0,0,0.05)' },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.fileBadgeText,
+                              file.status === 'created'
+                                ? { color: '#7B52FF' }
+                                : file.status === 'modified'
+                                ? { color: '#FF318C' }
+                                : { color: '#ABABAB' },
+                            ]}
+                          >
+                            {file.status}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+
+              {/* BOTTOM ACTION BAR */}
+              <View style={[styles.previewActionBar, { paddingBottom: insets.bottom + 28 }]}>
+                <TouchableOpacity style={styles.previewPrimaryBtn} activeOpacity={0.92} onPress={handleAccept}>
+                  <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.previewPrimaryGrad}>
+                    <GitBranch size={16} color="#FFFFFF" strokeWidth={2.2} />
+                    <Text style={styles.previewPrimaryText}>Accept & Commit to Git</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+                <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 4 }} activeOpacity={0.7} onPress={handleDiscard}>
+                  <Text style={styles.previewDiscardText}>Discard environment</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* PROGRESS BAR */}
+              <View
+                style={styles.genProgressTrack}
+                onLayout={(e) => {
+                  shimmerWidthRef.current = e.nativeEvent.layout.width;
                 }}
               >
-                <LinearGradient
-                  colors={['#FF318C', '#7B52FF', '#FF318C']}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={styles.genProgressFill}
-                />
-              </RNAnimated.View>
-            </RNAnimated.View>
-          </View>
-
-          {/* CHAT FEED */}
-          <ScrollView
-            ref={genScrollRef}
-            style={styles.genFeed}
-            contentContainerStyle={[styles.genFeedContent, { paddingBottom: insets.bottom + 8 + 88 }]}
-            showsVerticalScrollIndicator={false}
-          >
-            {genFeed.map(item => {
-              if (item.kind === 'activity') {
-                return (
-                  <ActivityRow
-                    key={item.id}
-                    label={item.label}
-                    status={item.status}
-                    doneValue={item.doneValue}
-                    doneColor={item.doneColor}
-                  />
-                );
-              }
-              if (item.kind === 'junie') {
-                return (
-                  <JunieMessage
-                    key={item.id}
-                    text={item.text}
-                    thinkingMs={item.thinkingMs ?? 1200}
-                  />
-                );
-              }
-              if (item.kind === 'user') {
-                return <UserMessage key={item.id} text={item.text} />;
-              }
-              if (item.kind === 'question') {
-                return (
-                  <QuestionCard
-                    key={item.id}
-                    question={item.question}
-                    options={item.options}
-                    onAnswer={(answerText) => handleQuestionAnswer(item.id, answerText)}
-                  />
-                );
-              }
-              return null;
-            })}
-          </ScrollView>
-
-          {/* INPUT BAR */}
-          <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
-            <View style={styles.inputRow}>
-              <TouchableOpacity style={styles.inputIconBtn} activeOpacity={0.85}>
-                <Plus size={18} color="rgba(25,25,28,0.55)" />
-              </TouchableOpacity>
-
-              <TextInput
-                value={genInput}
-                onChangeText={setGenInput}
-                placeholder="Ask Junie anything..."
-                placeholderTextColor="rgba(25,25,28,0.35)"
-                style={styles.inputText}
-                multiline
-                maxHeight={80}
-              />
-
-              <RNAnimated.View
-                style={[
-                  styles.sendBtn,
-                  {
-                    transform: [{ scale: sendScale }],
-                  }
-                ]}
-              >
-                <View pointerEvents="none" style={styles.sendBtnBaseBg} />
-                <RNAnimated.View pointerEvents="none" style={[styles.sendBtnGradWrap, { opacity: sendBg }]}>
-                  <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sendBtnGrad} />
-                </RNAnimated.View>
-                <TouchableOpacity
-                  style={styles.sendBtnPressable}
-                  activeOpacity={0.85}
-                  onPress={hasSendText ? handleSend : undefined}
+                <RNAnimated.View
+                  style={[
+                    styles.genProgressFillWrap,
+                    { width: genProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }
+                  ]}
                 >
-                  {hasSendText ? (
-                    <ArrowUp size={18} color="#FFFFFF" />
-                  ) : (
-                    <Mic size={18} color="rgba(25,25,28,0.45)" />
-                  )}
-                </TouchableOpacity>
-              </RNAnimated.View>
-            </View>
-          </View>
+                  <RNAnimated.View
+                    style={{
+                      width: '200%',
+                      height: '100%',
+                      transform: [
+                        {
+                          translateX: shimmerAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [-(shimmerWidthRef.current || 200) / 2, 0],
+                          }),
+                        },
+                      ],
+                    }}
+                  >
+                    <LinearGradient
+                      colors={['#FF318C', '#7B52FF', '#FF318C']}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.genProgressFill}
+                    />
+                  </RNAnimated.View>
+                </RNAnimated.View>
+              </View>
+
+              {/* CHAT FEED */}
+              <ScrollView
+                ref={genScrollRef}
+                style={styles.genFeed}
+                contentContainerStyle={[styles.genFeedContent, { paddingBottom: insets.bottom + 8 + 88 }]}
+                showsVerticalScrollIndicator={false}
+              >
+                {genFeed.map((item, idx) => {
+                  const prev = genFeed[idx - 1];
+                  const shouldInsertDivider =
+                    item.kind !== 'activity' && (idx === 0 || prev?.kind === 'activity');
+
+                  if (item.kind === 'activity') {
+                    return (
+                      <ActivityRow
+                        key={item.id}
+                        label={item.label}
+                        status={item.status}
+                        doneValue={item.doneValue}
+                        doneColor={item.doneColor}
+                      />
+                    );
+                  }
+                  if (item.kind === 'junie') {
+                    return (
+                      <View key={item.id}>
+                        {shouldInsertDivider ? <View style={styles.feedSectionDivider} /> : null}
+                        <JunieMessage text={item.text} thinkingMs={item.thinkingMs ?? 1200} />
+                      </View>
+                    );
+                  }
+                  if (item.kind === 'user') {
+                    return (
+                      <View key={item.id}>
+                        {shouldInsertDivider ? <View style={styles.feedSectionDivider} /> : null}
+                        <UserMessage text={item.text} />
+                      </View>
+                    );
+                  }
+                  if (item.kind === 'question') {
+                    return (
+                      <View key={item.id}>
+                        {shouldInsertDivider ? <View style={styles.feedSectionDivider} /> : null}
+                        <QuestionCard
+                          question={item.question}
+                          options={item.options}
+                          onAnswer={(answerText) => handleQuestionAnswer(item.id, answerText)}
+                        />
+                      </View>
+                    );
+                  }
+                  return null;
+                })}
+              </ScrollView>
+
+              {/* INPUT BAR */}
+              <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+                <View style={styles.inputRow}>
+                  <TouchableOpacity style={styles.inputIconBtn} activeOpacity={0.85}>
+                    <Plus size={18} color="rgba(25,25,28,0.55)" />
+                  </TouchableOpacity>
+
+                  <TextInput
+                    value={genInput}
+                    onChangeText={setGenInput}
+                    placeholder="Ask Junie anything..."
+                    placeholderTextColor="rgba(25,25,28,0.35)"
+                    style={styles.inputText}
+                    multiline
+                    maxHeight={80}
+                  />
+
+                  <RNAnimated.View
+                    style={[
+                      styles.sendBtn,
+                      {
+                        transform: [{ scale: sendScale }],
+                      }
+                    ]}
+                  >
+                    <View pointerEvents="none" style={styles.sendBtnBaseBg} />
+                    <RNAnimated.View pointerEvents="none" style={[styles.sendBtnGradWrap, { opacity: sendBg }]}>
+                      <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sendBtnGrad} />
+                    </RNAnimated.View>
+                    <TouchableOpacity
+                      style={styles.sendBtnPressable}
+                      activeOpacity={0.85}
+                      onPress={hasSendText ? handleSend : undefined}
+                    >
+                      {hasSendText ? (
+                        <ArrowUp size={18} color="#FFFFFF" />
+                      ) : (
+                        <Mic size={18} color="rgba(25,25,28,0.45)" />
+                      )}
+                    </TouchableOpacity>
+                  </RNAnimated.View>
+                </View>
+              </View>
+            </>
+          )}
         </JetDevHeroGradient>
       </SlideUpModal>
 
@@ -1151,150 +1419,238 @@ const styles = StyleSheet.create({
   plainHeaderBtnText: { fontSize: 14, fontWeight: '500', color: '#0060FF' },
 
   /* Fullscreen Generating State */
-  genHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 16 },
-  genCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.04)', borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)', alignItems: 'center', justifyContent: 'center' },
-  genProjectName: { color: '#19191C', fontSize: 17, fontWeight: '700' },
-  genStackTag: { backgroundColor: 'rgba(0,0,0,0.035)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
-  genStackTagText: { color: 'rgba(25,25,28,0.9)', fontSize: 11, fontWeight: '700' },
+  genHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
+  genCloseBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F5F5F7', alignItems: 'center', justifyContent: 'center' },
+  genProjectName: { color: '#19191C', fontSize: 16, fontWeight: '700', letterSpacing: -0.3 },
+  genStackTag: { backgroundColor: '#F5F5F7', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
+  genStackTagText: { color: '#8A8A8A', fontSize: 12, fontWeight: '500' },
 
   genWhiteBase: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFFFFF' },
   genTintOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
-  genStepper: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginHorizontal: 20, marginTop: 20, marginBottom: 12 },
+  genStepper: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16, marginTop: 0, marginBottom: 0 },
   genStepItem: { alignItems: 'center', flex: 1 },
-  genStepCircleRow: { flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'center', marginBottom: 10 },
+  genStepCircleRow: { flexDirection: 'row', alignItems: 'center', width: '100%', justifyContent: 'center', marginBottom: 5 },
   genStepIconWrap: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', zIndex: 2, backgroundColor: 'transparent' },
-  genActiveCircle: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#0060FF', position: 'absolute' },
+  genActiveCircle: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#19191C', position: 'absolute' },
   pulsingRing: { position: 'absolute', width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0, 96, 255, 0.4)', zIndex: 1 },
-  genStepPending: { width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'transparent', zIndex: 2 },
-  genStepLine: { position: 'absolute', left: '50%', right: '-50%', height: 2, backgroundColor: 'rgba(0,0,0,0.10)', zIndex: 1 },
-  genStepLineDone: { backgroundColor: JB.success },
-  genStepText: { fontSize: 13, color: 'rgba(25,25,28,0.45)', fontWeight: '600' },
-  genStepTextDone: { color: JB.success, fontWeight: '600' },
-  genStepTextActive: { color: '#19191C', fontWeight: '800' },
+  genStepPending: { width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: '#D5D5D5', backgroundColor: 'transparent', zIndex: 2 },
+  genStepLine: { position: 'absolute', left: '50%', right: '-50%', height: 2, backgroundColor: '#EBEBEB', zIndex: 1 },
+  genStepLineDone: { backgroundColor: '#EBEBEB' },
+  genStepText: { fontSize: 11, color: '#C0C0C0', fontWeight: '400', marginTop: 5, letterSpacing: 0.1 },
+  genStepTextDone: { color: '#FF318C', fontWeight: '500' },
+  genStepTextActive: { color: '#19191C', fontWeight: '500' },
 
-  genProgressTrack: { width: '100%', height: 3, backgroundColor: '#F0F0F0', overflow: 'hidden' },
+  stepCircleDone: { width: 26, height: 26, borderRadius: 13, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+  stepCircleActive: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#19191C', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+  stepCircleActiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
+  stepCirclePending: { width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: '#D5D5D5', backgroundColor: 'transparent', zIndex: 2 },
+  stepLineDone: { position: 'absolute', left: '50%', right: '-50%', height: 1.5 },
+  stepLinePending: { position: 'absolute', left: '50%', right: '-50%', height: 1.5, backgroundColor: '#EBEBEB' },
+
+  genProgressTrack: { width: '100%', height: 1.5, backgroundColor: '#F0F0F0', overflow: 'hidden' },
   genProgressFillWrap: { height: '100%' },
   genProgressFill: { width: '100%', height: '100%' },
 
+  genStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F0F0F0',
+  },
+  genLiveRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  genLiveDotWrap: { width: 8, height: 8, borderRadius: 4, overflow: 'hidden', position: 'relative' },
+  genLivePulseRing: { position: 'absolute', top: -6, left: -6, right: -6, bottom: -6, borderRadius: 999, borderWidth: 1.5, borderColor: 'rgba(255,49,140,0.25)' },
+  genLiveText: { fontSize: 13, fontWeight: '600', color: '#19191C', letterSpacing: -0.1 },
+  genStatusStackPill: { backgroundColor: '#F5F5F7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3 },
+  genStatusStackText: { fontSize: 11, fontWeight: '500', color: '#8A8A8A' },
+
+  genTabs: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F0F0F0',
+    gap: 4,
+  },
+  genTabBtn: { paddingHorizontal: 4, paddingTop: 6, paddingBottom: 10, marginRight: 16, position: 'relative' },
+  genTabText: { fontSize: 13, fontWeight: '400', color: '#ABABAB', letterSpacing: -0.1 },
+  genTabTextActive: { fontWeight: '600', color: '#19191C' },
+  genTabUnderline: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 2, borderRadius: 1 },
+
+  // (removed) old dark JSON card styles
+
+  nextStepsWrap: { marginHorizontal: 16, marginTop: 20 },
+  nextStepsHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  nextStepsTitle: { fontSize: 10, fontWeight: '800', color: '#7B52FF', letterSpacing: 1.4, textTransform: 'uppercase' },
+  nextStepRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#F0F0F0' },
+  nextStepAccent: { width: 2, height: 18, borderRadius: 1, overflow: 'hidden', marginRight: 12 },
+  nextStepLabel: { flex: 1, fontSize: 14, fontWeight: '400', color: '#19191C', letterSpacing: -0.1 },
+
+  logsCard: { margin: 16, backgroundColor: '#141417', borderRadius: 14, padding: 14, minHeight: 200 },
+  logRow: { flexDirection: 'row', gap: 10, marginBottom: 3 },
+  logTime: { fontSize: 11, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.25)', width: 52 },
+  logMsg: { flex: 1, fontSize: 11, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.65)', lineHeight: 17 },
+
+  fileRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#F0F0F0' },
+  fileLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingRight: 12 },
+  filePath: { flex: 1, fontSize: 13, fontFamily: MONO_FONT, color: '#19191C', letterSpacing: -0.1 },
+  fileBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5 },
+  fileBadgeText: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
+
+  previewActionBar: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#F0F0F0', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingTop: 12, position: 'absolute', left: 0, right: 0, bottom: 0 },
+  previewPrimaryBtn: { borderRadius: 16, overflow: 'hidden', marginBottom: 10 },
+  previewPrimaryGrad: { paddingVertical: 15, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  previewPrimaryText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 },
+  previewDiscardText: { fontSize: 13, fontWeight: '400', color: '#ABABAB', letterSpacing: -0.1 },
+
+  webViewCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 14,
+    overflow: 'hidden',
+    height: 260,
+    backgroundColor: '#F5F5F7',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  webChrome: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#F0F0F3',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.08)',
+    gap: 6,
+  },
+  chromeDot1: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.15)' },
+  chromeDot2: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.10)' },
+  chromeDot3: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(0,0,0,0.08)' },
+  urlBar: { flex: 1, marginLeft: 8, backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  urlText: { fontSize: 11, color: '#6B6B6B', fontWeight: '400', letterSpacing: -0.1, flex: 1 },
+  webLoading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#F5F5F7', justifyContent: 'center', alignItems: 'center' },
+
   genFeed: { flex: 1, backgroundColor: 'transparent' },
   genFeedContent: { paddingTop: 8, paddingHorizontal: 0 },
+  feedSectionDivider: { height: 1, backgroundColor: '#F0F0F0', marginHorizontal: 20, marginVertical: 8 },
 
   activityRowWrap: { width: '100%' },
   activityRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.06)',
+    minHeight: 44,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F0F0F0',
   },
-  activityLabel: { fontSize: 15, color: '#19191C' },
+  activityLabel: { flex: 1, fontSize: 15, color: '#19191C', letterSpacing: -0.1 },
   activityLabelActive: { fontWeight: '500' },
   activityLabelDone: { fontWeight: '400' },
-  activityRight: { alignItems: 'flex-end', minHeight: 18, justifyContent: 'center' },
+  activityRight: { flexShrink: 0, marginLeft: 12, alignItems: 'flex-end' },
   activitySearchingWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  activitySearchingText: { fontSize: 13, color: 'rgba(25,25,28,0.45)', fontStyle: 'italic' },
+  activitySearchingText: { fontSize: 12, color: '#C0C0C0', fontStyle: 'italic', letterSpacing: 0.2 },
   activityDotsRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   activityDotWrap: { width: 5, height: 5, borderRadius: 2.5, overflow: 'hidden' },
   activityDotGrad: { width: '100%', height: '100%' },
-  activityValue: { fontSize: 14, fontWeight: '600' },
-  activityValueGradientMask: { fontSize: 14, fontWeight: '700', color: '#000' },
+  activityValue: { fontSize: 13, fontWeight: '600', letterSpacing: 0.1, color: '#19191C' },
+  activityValueNeutral: { fontSize: 13, fontWeight: '500', letterSpacing: 0.1, color: '#8A8A8A' },
+  activityValueGradientMask: { fontSize: 13, fontWeight: '600', letterSpacing: 0.1, textAlign: 'right', backgroundColor: 'transparent' },
 
-  junieBlock: { width: '100%', marginTop: 10 },
-  junieLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5, marginLeft: 20 },
-  junieLabelText: { fontSize: 11, fontWeight: '800', color: '#000', letterSpacing: 0.8 },
+  junieBlock: { width: '100%', marginTop: 4 },
+  junieLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 20, marginBottom: 8, marginTop: 4 },
+  junieLabelText: { fontSize: 11, fontWeight: '700', color: '#FF318C', letterSpacing: 0.8, textTransform: 'uppercase' },
   junieBubble: {
     alignSelf: 'flex-start',
-    marginHorizontal: 20,
-    maxWidth: '82%',
-    backgroundColor: 'rgba(25,25,28,0.035)',
-    borderWidth: 1,
-    borderColor: 'rgba(25,25,28,0.08)',
+    maxWidth: '80%',
+    backgroundColor: '#EBEBF0',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.06)',
     borderTopLeftRadius: 4,
-    borderTopRightRadius: 16,
-    borderBottomRightRadius: 16,
-    borderBottomLeftRadius: 16,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 18,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 6,
+    paddingVertical: 11,
+    marginLeft: 20,
+    marginBottom: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
-  junieText: { fontSize: 14, color: '#19191C', lineHeight: 21 },
+  junieText: { fontSize: 14, lineHeight: 21, color: '#19191C', fontWeight: '400' },
+  thinkingBubble: { minWidth: 60, paddingHorizontal: 16, paddingVertical: 12 },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 4 },
   thinkingDotWrap: { width: 8, height: 8, borderRadius: 4, overflow: 'hidden' },
   thinkingDotGrad: { width: '100%', height: '100%' },
 
-  userBubble: {
-    alignSelf: 'flex-end',
-    marginHorizontal: 20,
-    maxWidth: '72%',
-    backgroundColor: 'rgba(25,25,28,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(25,25,28,0.10)',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 4,
-    borderBottomRightRadius: 16,
-    borderBottomLeftRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 6,
-  },
-  userText: { fontSize: 14, color: '#19191C' },
+  userBubbleOuter: { alignSelf: 'flex-end', marginRight: 20, maxWidth: '80%', padding: 1.5, borderRadius: 21, overflow: 'hidden', marginBottom: 4 },
+  userBubbleGradFill: { ...StyleSheet.absoluteFillObject, borderRadius: 21 },
+  userBubbleInner: { backgroundColor: '#FFFFFF', borderRadius: 19.5, paddingHorizontal: 14, paddingVertical: 11 },
+  userText: { fontSize: 14, lineHeight: 21, color: '#19191C', fontWeight: '400' },
 
   questionWrap: { width: '100%' },
-  qBorderWrap: { marginHorizontal: 16, marginVertical: 8, padding: 1.5, borderRadius: 19, overflow: 'hidden' },
-  qInnerCard: { backgroundColor: '#FAFAFA', borderRadius: 18, overflow: 'hidden' },
-  questionAccentLine: { height: 2, width: '100%' },
-  questionInner: { padding: 16 },
-  questionLabel: { fontSize: 10, fontWeight: '800', color: '#000', letterSpacing: 1.4, marginBottom: 10 },
-  questionText: { fontSize: 16, fontWeight: '700', color: '#19191C', lineHeight: 23, marginBottom: 16 },
+  qBorderWrap: { marginHorizontal: 16, marginVertical: 8, padding: 1, borderRadius: 20, overflow: 'hidden' },
+  qBorderGrad: { ...StyleSheet.absoluteFillObject, borderRadius: 20 },
+  qInnerCard: { backgroundColor: '#FEFEFE', borderRadius: 19, padding: 18 },
+  qHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12 },
+  qHeaderText: { fontSize: 10, fontWeight: '800', color: '#FF318C', letterSpacing: 1.8, textTransform: 'uppercase' },
+  questionText: { fontSize: 16, fontWeight: '700', color: '#19191C', lineHeight: 23, letterSpacing: -0.3, marginBottom: 16 },
   questionOptionsCol: { gap: 8 },
   questionOptionBtn: {
-    backgroundColor: 'rgba(0,0,0,0.03)',
+    backgroundColor: '#F8F8FA',
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    borderColor: 'rgba(0,0,0,0.07)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
     paddingVertical: 13,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
-  questionOptionBtnSelected: { borderColor: '#FF318C', backgroundColor: 'rgba(255,49,140,0.10)' },
+  questionOptionBtnSelected: { borderColor: '#FF318C', backgroundColor: '#FFF0F7' },
   questionOptionText: { fontSize: 14, fontWeight: '500', color: '#19191C' },
+  questionOptionTextSelected: { color: '#FF318C' },
 
   inputBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    backgroundColor: 'rgba(255,255,255,0.82)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.08)',
+    borderTopColor: '#F0F0F0',
   },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   inputIconBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
+    backgroundColor: '#F5F5F7',
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   inputText: {
     flex: 1,
-    marginHorizontal: 10,
-    backgroundColor: 'rgba(0,0,0,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    borderRadius: 20,
+    marginHorizontal: 0,
+    backgroundColor: '#F5F5F7',
+    borderWidth: 0,
+    borderRadius: 22,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 9,
     color: '#19191C',
     fontSize: 14,
   },
@@ -1306,7 +1662,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  sendBtnBaseBg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.04)' },
+  sendBtnBaseBg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#F5F5F7' },
   sendBtnGradWrap: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   sendBtnGrad: { width: '100%', height: '100%' },
   sendBtnPressable: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
