@@ -1,0 +1,40 @@
+{
+  "name": "jetdev-backend",
+  "version": "0.1.0",
+  "description": "JetDev backend orchestrator: receives prompts from the mobile app, runs the generation pipeline and exposes task status to the frontend.",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "watch:task": "node scripts/watch-task.js",
+    "test:store": "node scripts/smoke-store.js",
+    "test:pipeline": "node scripts/smoke-pipeline.js",
+    "test:api": "node scripts/smoke-api.js",
+    "test:e2e": "node scripts/smoke-e2e.js",
+    "test:offline": "npm run test:store && npm run test:pipeline",
+    "test:online": "npm run test:api && npm run test:e2e"
+  },
+  "keywords": [
+    "jetdev",
+    "backend",
+    "orchestrator",
+    "express"
+  ],
+  "author": "Ivan",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "nanoid": "^5.1.9"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
