@@ -112,32 +112,69 @@ async function enhancePrompt(userPrompt) {
 // STEP 3A — Run Junie CLI to generate code
 // =============================================================================
 
+const JUNIE_CLI_JS = path.join(
+  __dirname,
+  "..",
+  "node_modules",
+  "@jetbrains",
+  "junie-cli",
+  "bin",
+  "index.js"
+);
+
+/**
+ * En Windows, spawnSync("npx.cmd", ...) a menudo devuelve EINVAL (bug/limit de Node con .cmd).
+ * Siempre usamos: node <repo>/node_modules/@jetbrains/junie-cli/bin/index.js
+ *
+ * Además, el postinstall de @jetbrains/junie-cli en win32 no descarga el binario; hace falta
+ * el instalador oficial: https://junie.jetbrains.com (script PowerShell en la doc).
+ */
 function runJunie(enhancedPrompt, projectPath) {
   const apiKey = process.env.JUNIE_API_KEY;
-  if (!apiKey) return false; 
+  if (!apiKey) return false;
+
+  if (!fs.existsSync(JUNIE_CLI_JS)) {
+    console.log(`   ⚠ No está instalado @jetbrains/junie-cli: ${JUNIE_CLI_JS}`);
+    console.log("   → Ejecuta: cd generator && npm install");
+    return false;
+  }
+
+  const junieArgs = [
+    JUNIE_CLI_JS,
+    `--auth=${apiKey}`,
+    `--project=${projectPath}`,
+    enhancedPrompt,
+  ];
 
   try {
-    console.log("   → Conectando nativamente a Engine Junie CLI...");
-    
-    // Windows usará npx.cmd, pero tu WSL Linux usará la instalación pura de JetBrains EAP ('junie')
-    const cmd = process.platform === "win32" ? "npx.cmd" : "junie";
-    const args = process.platform === "win32" 
-      ? ["junie", `--auth=${apiKey}`, `--project=${projectPath}`, enhancedPrompt]
-      : [`--auth=${apiKey}`, `--project=${projectPath}`, enhancedPrompt];
+    console.log("   → Lanzando Junie CLI (node, sin npx)…");
 
-    const result = spawnSync(cmd, args, {
+    const result = spawnSync(process.execPath, junieArgs, {
       cwd: projectPath,
-      stdio: "inherit", // Para que veas todo lo que escupe Junie mientras programa
+      stdio: "inherit",
       timeout: 180000,
+      windowsHide: true,
     });
 
     if (result.error) {
       console.log(`   ⚠ Error interno ejecutando Junie: ${result.error.message}`);
+      if (process.platform === "win32") {
+        console.log(
+          "   ℹ En Windows, instala el binario de Junie con el script oficial (PowerShell) desde:\n" +
+            "     https://www.jetbrains.com/help/junie/junie-cli.html"
+        );
+      }
       return false;
     }
-    
+
     if (result.status !== 0) {
       console.log(`   ⚠ Junie abortado con código ${result.status}`);
+      if (process.platform === "win32") {
+        console.log(
+          "   ℹ Si ves \"Shim not found\": ejecuta en PowerShell el instalador de JetBrains para Junie CLI, " +
+            "luego comprueba que exista un ejecutable bajo %USERPROFILE%\\.local\\bin"
+        );
+      }
       return false;
     }
 
@@ -148,6 +185,7 @@ function runJunie(enhancedPrompt, projectPath) {
 
     return true; // Éxito completo de Junie
   } catch (e) {
+    console.log(`   ⚠ Excepción en runJunie: ${e && e.message ? e.message : e}`);
     return false;
   }
 }
