@@ -95,11 +95,13 @@ async function loadRealGeneratorModule() {
   return exported;
 }
 
-async function realGenerateProject({ prompt, taskId }) {
+async function realGenerateProject(input) {
+  const { taskId } = input ?? {};
   logger.info(`[generator:real] start for task ${taskId}`);
   const realGen = await loadRealGeneratorModule();
 
-  const result = await realGen.generateProject({ prompt, taskId });
+  // Pass through any optional callbacks (instrumentation-only).
+  const result = await realGen.generateProject(input);
 
   if (
     !result ||

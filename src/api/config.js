@@ -16,7 +16,9 @@ import { Platform } from 'react-native';
  */
 function resolveBase() {
   if (process.env.EXPO_PUBLIC_API_BASE) {
-    return process.env.EXPO_PUBLIC_API_BASE.replace(/\/+$/, '');
+    let base = process.env.EXPO_PUBLIC_API_BASE.trim();
+    base = base.replace(/^['"]+|['"]+$/g, '');
+    return base.replace(/\/+$/, '');
   }
 
   if (Platform.OS !== 'web') {
@@ -30,6 +32,17 @@ function resolveBase() {
       const host = hostUri.split(':')[0];
       if (host && host !== 'localhost' && host !== '127.0.0.1') {
         return `http://${host}:3001`;
+      }
+    }
+
+    // Fallback: extract the LAN IP from experienceUrl (e.g., exp://10.x.x.x:8081)
+    if (Constants?.experienceUrl && typeof Constants.experienceUrl === 'string') {
+      const match = Constants.experienceUrl.match(/:\/\/(?:.*@)?([^:/]+)/);
+      if (match && match[1]) {
+        const host = match[1];
+        if (host && host !== 'localhost' && host !== '127.0.0.1') {
+          return `http://${host}:3001`;
+        }
       }
     }
   }

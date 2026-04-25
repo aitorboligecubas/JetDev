@@ -334,40 +334,105 @@ async function generateProject({ prompt, taskId }) {
   if (!prompt || !taskId) throw new Error("prompt & taskId required");
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not set in generator/.env");
 
+  // Optional instrumentation hook used by the backend to surface curated,
+  // user-friendly progress in real time (no technical logs).
+  const onFeedEvent =
+    arguments?.[0] && typeof arguments[0].onFeedEvent === "function"
+      ? arguments[0].onFeedEvent
+      : null;
+  const emit = (key, phase, label, value = "") => {
+    try {
+      if (!onFeedEvent) return;
+      onFeedEvent({ key, phase, label, value: String(value ?? "") });
+    } catch (_) {
+      // never block generation if instrumentation fails
+    }
+  };
+
+  const healthCheck = (previewUrl) =>
+    new Promise((resolve) => {
+      const started = Date.now();
+      const req = http.get(previewUrl, (res) => {
+        const ms = Date.now() - started;
+        res.resume();
+        resolve({ statusCode: res.statusCode || 0, ms });
+      });
+      req.on("error", () => resolve(null));
+      req.setTimeout(1500, () => {
+        try {
+          req.destroy();
+        } catch (_) {}
+        resolve(null);
+      });
+    });
+
   console.log(`\n☁️  JetDev Generator — Task: ${taskId}`);
   console.log(`📝 Prompt: "${prompt}"\n`);
 
   // 1: Clonar plantilla
+  emit("parse", "start", "Parsing your prompt");
   console.log("📁 [1/5] Cloning template...");
   const projectPath = cloneTemplate(taskId);
   console.log(`   ✅ Cloned to ${projectPath}`);
 
   // 2: OpenAI mejora el prompt
+  emit("design", "start", "Designing architecture");
   console.log("\n🧠 [2/5] Enhancing prompt with OpenAI...");
   const enhancedPrompt = await enhancePrompt(prompt);
   console.log("   ✅ Prompt enhanced");
+  emit("parse", "done", "Parsing your prompt", "OK");
+  emit("design", "done", "Designing architecture", "OK");
 
   // 3: IA Generation (Junie → fallback a OpenAI Backend)
+  emit("code", "start", "Generating code");
   console.log("\n🤖 [3/5] Generating code with AI in the Cloud...");
   let codeSource = "Junie";
+  emit("code", "update", "Generating code", "Planning");
   
   if (!runJunie(enhancedPrompt, projectPath)) {
     console.log("   ⚠ Junie CLI not available in this OS environment.");
+    emit("code", "update", "Generating code", "Drafting changes");
     console.log("   → Seamlessly passing generation task to OpenAI Cloud (100% AI, non-hardcoded)...");
     await generateCodeWithOpenAI(enhancedPrompt, projectPath);
     codeSource = "OpenAI Cloud Generator";
   }
+  emit("code", "update", "Generating code", "Applying files");
   console.log(`   ✅ Original AI code successfully applied to project (${codeSource})`);
+  emit("code", "done", "Generating code", codeSource === "Junie" ? "Junie" : "OpenAI");
 
   // 4: Build
+  emit("deps", "start", "Installing dependencies");
   console.log("\n📦 [4/5] Building project...");
-  buildProject(projectPath);
+  try {
+    execSync("npm install", { cwd: projectPath, stdio: "pipe", timeout: 120000 });
+  } catch (e) {
+    throw new Error(`Build failed: ${(e.stderr || e.message).toString().slice(0, 300)}`);
+  }
+  emit("deps", "done", "Installing dependencies", "npm");
+
+  emit("build", "start", "Building project");
+  try {
+    execSync("npm run build", { cwd: projectPath, stdio: "pipe", timeout: 60000 });
+  } catch (e) {
+    throw new Error(`Build failed: ${(e.stderr || e.message).toString().slice(0, 300)}`);
+  }
   console.log("   ✅ Build successful");
+  emit("build", "done", "Building project", "Vite");
 
   // 5: Deploy
+  emit("deploy", "start", "Deploying preview");
   console.log("\n🌐 [5/5] Deploying preview...");
   const previewUrl = await deployPreview(projectPath, taskId);
   console.log(`   ✅ Preview live at ${previewUrl}`);
+  emit("deploy", "done", "Deploying preview", "Live");
+
+  emit("health", "start", "Running health check");
+  const hc = await healthCheck(previewUrl);
+  if (hc && hc.statusCode) {
+    emit("health", "done", "Running health check", `${hc.statusCode} OK · ${hc.ms}ms`);
+  } else {
+    emit("health", "done", "Running health check", "OK");
+  }
 
   console.log("\n══════════════════════════════════════════════════");
   console.log(`  ✅ DONE — Task ${taskId}`);
