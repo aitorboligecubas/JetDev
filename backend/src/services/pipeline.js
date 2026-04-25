@@ -51,6 +51,9 @@ export async function runPipeline(taskId) {
         const value = typeof evt.value === 'string' ? evt.value : '';
         addLog(taskId, `FEED|${key}|${phase}|${label}|${value}`);
       },
+      onLog: (msg) => {
+        if (typeof msg === 'string') addLog(taskId, msg);
+      },
     });
     if (!generation || !generation.projectPath || !generation.previewUrl) {
       throw new Error('generateProject returned an invalid result');

@@ -260,9 +260,22 @@ Rules:
 - No external libraries, only React + CSS
 - NO markdown, NO explanations — ONLY JSON`;
 
-async function generateCodeWithOpenAI(enhancedPrompt, projectPath) {
+async function generateCodeWithOpenAI(enhancedPrompt, projectPath, generatorArgs) {
   const apiKey = process.env.OPENAI_API_KEY;
   const openai = new OpenAI({ apiKey });
+  
+  // Bind arguments inside this function
+  const arguments = [generatorArgs];
+
+  const onLog = arguments?.[0] && typeof arguments[0].onLog === "function" ? arguments[0].onLog : null;
+  const logToClient = (msg) => { if (onLog) onLog(msg); };
+
+  console.log("   [LOG DE VERIFICACIÓN] Enviando el siguiente prompt a OpenAI:");
+  logToClient("[LOG DE VERIFICACIÓN] Enviando el siguiente prompt a OpenAI:");
+  console.log("   --------------------------------------------------");
+  console.log(`   ${enhancedPrompt.slice(0, 500)}...`);
+  logToClient(enhancedPrompt.slice(0, 500) + "...");
+  console.log("   --------------------------------------------------");
 
   const res = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -279,6 +292,17 @@ async function generateCodeWithOpenAI(enhancedPrompt, projectPath) {
   if (!parsed.appJsx || !parsed.appCss) {
     throw new Error("OpenAI failed to parse final code objects.");
   }
+
+  console.log("   [LOG DE VERIFICACIÓN] ¡OpenAI ha devuelto el código en tiempo real!");
+  logToClient("[LOG DE VERIFICACIÓN] ¡OpenAI ha devuelto el código en tiempo real!");
+  console.log("   ► Primeros 150 caracteres de App.jsx:");
+  logToClient("► Primeros 150 caracteres de App.jsx:");
+  console.log(`     ${parsed.appJsx.slice(0, 150).replace(/\n/g, " ")}...`);
+  logToClient(parsed.appJsx.slice(0, 150).replace(/\n/g, " ") + "...");
+  console.log("   ► Primeros 150 caracteres de App.css:");
+  logToClient("► Primeros 150 caracteres de App.css:");
+  console.log(`     ${parsed.appCss.slice(0, 150).replace(/\n/g, " ")}...`);
+  logToClient(parsed.appCss.slice(0, 150).replace(/\n/g, " ") + "...");
 
   // Escribir los resultados en tiempo real sobre el proyecto del usuario
   fs.writeFileSync(path.join(projectPath, "src", "App.jsx"), parsed.appJsx, "utf-8");
@@ -446,7 +470,7 @@ async function generateProject({ prompt, taskId }) {
     console.log("   ⚠ Junie CLI not available in this OS environment.");
     emit("code", "update", "Generating code", "Drafting changes");
     console.log("   → Seamlessly passing generation task to OpenAI Cloud (100% AI, non-hardcoded)...");
-    await generateCodeWithOpenAI(enhancedPrompt, projectPath);
+    await generateCodeWithOpenAI(enhancedPrompt, projectPath, arguments[0]);
     codeSource = "OpenAI Cloud Generator";
   }
   emit("code", "update", "Generating code", "Applying files");
