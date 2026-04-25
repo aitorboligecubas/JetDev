@@ -7,6 +7,8 @@ import MaskedView from '@react-native-masked-view/masked-view';
 import { useToast } from '../components/Toast';
 import { JB, Type, Colors } from '../constants/theme';
 import { quickPrompts } from '../constants/data';
+import { createTask, pollTask, acceptTask } from '../api/jetdev';
+import { API_BASE } from '../api/config';
 import Svg, { Path } from 'react-native-svg';
 import {
   Zap, Terminal, GitBranch, CheckCircle,
@@ -452,6 +454,13 @@ export default function JetDevScreen() {
   const [genFeed, setGenFeed] = useState([]);
   const [genInput, setGenInput] = useState('');
 
+  const [task, setTask] = useState(null);
+  const [taskError, setTaskError] = useState('');
+  const [accepting, setAccepting] = useState(false);
+  const cancelPollRef = useRef(null);
+  const seenLogsRef = useRef(new Set());
+  const seenStatusesRef = useRef(new Set());
+
   const genScrollRef = useRef(null);
   const genProgress = useRef(new RNAnimated.Value(0)).current;
   const genTimers = useRef([]);
@@ -485,165 +494,34 @@ export default function JetDevScreen() {
   }, [isExpanded, insets.bottom, navigation]);
 
   useEffect(() => {
-    if (state === 'generating') {
-      setIsExpanded(true);
-      setCurrentStep(0);
-      setGenFeed([]);
-      setGenInput('');
-      
-      genProgress.stopAnimation();
-      genProgress.setValue(0);
-      RNAnimated.timing(genProgress, {
-        toValue: 1,
-        duration: 13000,
-        easing: Easing.linear,
-        useNativeDriver: false,
-      }).start();
+    if (state !== 'generating') return undefined;
 
-      // shimmer loop (visual only)
+    setIsExpanded(true);
+    setCurrentStep(0);
+    setGenFeed([]);
+    setGenInput('');
+
+    genProgress.stopAnimation();
+    genProgress.setValue(0);
+
+    shimmerAnim.stopAnimation();
+    shimmerAnim.setValue(0);
+    const shimmerLoop = RNAnimated.loop(
+      RNAnimated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    shimmerLoop.start();
+
+    return () => {
+      shimmerLoop.stop();
       shimmerAnim.stopAnimation();
       shimmerAnim.setValue(0);
-      const shimmerLoop = RNAnimated.loop(
-        RNAnimated.timing(shimmerAnim, {
-          toValue: 1,
-          duration: 1400,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      );
-      shimmerLoop.start();
-
-      // clear any previous timers
-      genTimers.current.forEach(t => clearTimeout(t));
-      genTimers.current = [];
-
-      const schedule = (ms, fn) => {
-        const t = setTimeout(() => {
-          if (stateRef.current !== 'generating') return;
-          fn();
-        }, ms);
-        genTimers.current.push(t);
-      };
-
-      const addItem = (item) => setGenFeed(prev => [...prev, item]);
-      const upsertActivity = (id, patch) => setGenFeed(prev => prev.map(i => (i.id === id ? { ...i, ...patch } : i)));
-
-      const a1 = makeId();
-      const a2 = makeId();
-      const a3 = makeId();
-      const a4 = makeId();
-      const a5 = makeId();
-      const a6 = makeId();
-      const a7 = makeId();
-
-      schedule(0, () => {
-        addItem({ id: a1, kind: 'activity', label: 'Parsing your prompt', status: 'searching', doneValue: 'Node.js', doneColor: '#19191C' });
-      });
-
-      schedule(900, () => {
-        upsertActivity(a1, { status: 'done' });
-        addItem({ id: a2, kind: 'activity', label: 'Designing architecture', status: 'searching', doneValue: '12 files', doneColor: '#59A869' });
-        setCurrentStep(1);
-      });
-
-      schedule(1500, () => {
-        addItem({ id: makeId(), kind: 'junie', thinkingMs: 1200, text: "Got it. I'm building a REST API \nwith JWT auth and a PostgreSQL database." });
-      });
-
-      schedule(2200, () => {
-        upsertActivity(a2, { status: 'done' });
-      });
-
-      schedule(3200, () => {
-        addItem({ id: a3, kind: 'activity', label: 'Writing route handlers', status: 'searching', doneValue: '4 endpoints', doneColor: '#59A869' });
-      });
-
-      schedule(4000, () => {
-        addItem({ id: a4, kind: 'activity', label: 'Generating DB schema', status: 'searching', doneValue: '3 tables', doneColor: '#59A869' });
-      });
-
-      schedule(5000, () => {
-        upsertActivity(a3, { status: 'done' });
-      });
-
-      schedule(5200, () => {
-        addItem({
-          id: makeId(),
-          kind: 'question',
-          question: 'Should users cancel their own bookings?',
-          options: [
-            { icon: Trash2, text: 'Yes, let them cancel', answerText: 'Yes, let them cancel' },
-            { icon: Lock, text: 'No, admin only', answerText: 'No, admin only' },
-          ],
-        });
-      });
-
-      schedule(6300, () => {
-        upsertActivity(a4, { status: 'done' });
-      });
-
-      schedule(6500, () => {
-        addItem({ id: a5, kind: 'activity', label: 'Installing dependencies', status: 'searching', doneValue: '47 packages', doneColor: '#59A869' });
-      });
-
-      schedule(8000, () => {
-        upsertActivity(a5, { status: 'done' });
-      });
-
-      schedule(8300, () => {
-        addItem({ id: makeId(), kind: 'junie', thinkingMs: 1000, text: 'Almost there — one last thing.' });
-      });
-
-      schedule(9500, () => {
-        addItem({
-          id: makeId(),
-          kind: 'question',
-          question: 'Send email confirmations on new bookings?',
-          options: [
-            { icon: Mail, text: 'Yes, send email', answerText: 'Yes, send email' },
-            { icon: BellOff, text: 'Keep it simple', answerText: 'Keep it simple' },
-          ],
-        });
-      });
-
-      schedule(10500, () => {
-        setCurrentStep(2);
-        addItem({ id: a6, kind: 'activity', label: 'Provisioning server', status: 'searching', doneValue: 'us-east-1', doneColor: '#19191C' });
-      });
-
-      schedule(11500, () => {
-        upsertActivity(a6, { status: 'done' });
-      });
-
-      schedule(11700, () => {
-        addItem({ id: a7, kind: 'activity', label: 'Running health check', status: 'searching', doneValue: '200 OK · 12ms', doneColor: '#59A869' });
-      });
-
-      schedule(12500, () => {
-        upsertActivity(a7, { status: 'done' });
-      });
-
-      schedule(12700, () => {
-        addItem({ id: makeId(), kind: 'junie', thinkingMs: 600, text: 'Done ✓ Your API is live.' });
-        setCurrentStep(3);
-      });
-
-      schedule(13500, () => {
-        setIsExpanded(false);
-        setTimeout(() => {
-          if (stateRef.current === 'generating') setState('preview');
-        }, 300);
-      });
-
-      return () => {
-        shimmerLoop.stop();
-        shimmerAnim.stopAnimation();
-        shimmerAnim.setValue(0);
-        genTimers.current.forEach(t => clearTimeout(t));
-        genTimers.current = [];
-      };
-    }
-  }, [state]);
+    };
+  }, [state, genProgress, shimmerAnim]);
 
   useEffect(() => {
     if (!isExpanded) return;
@@ -693,34 +571,147 @@ export default function JetDevScreen() {
     ]).start();
   };
 
-  const handleGenerate = () => {
-    if (prompt.trim().length < 5) {
-      shake();
-      setState('error');
-      return;
-    }
-    if (prompt.toLowerCase().includes('error') || prompt.toLowerCase().includes('falla')) {
-      setState('error');
-      return;
-    }
-    setState('generating');
+  const STATUS_TO_STEP = { queued: 0, generating: 1, building: 1, deploying: 2, deployed: 3, pushing: 3, accepted: 3 };
+  const STATUS_TO_LABEL = {
+    generating: 'Generating code',
+    building: 'Building project',
+    deploying: 'Deploying preview',
+    pushing: 'Pushing to GitHub',
   };
 
-  const handleAccept = () => setState('success');
+  const ingestTaskUpdate = (incoming) => {
+    setTask(incoming);
+
+    if (typeof STATUS_TO_STEP[incoming.status] === 'number') {
+      setCurrentStep(STATUS_TO_STEP[incoming.status]);
+    }
+
+    if (Array.isArray(incoming.logs)) {
+      setGenFeed(prev => {
+        const out = [...prev];
+        incoming.logs.forEach((line, idx) => {
+          const key = `${idx}::${line}`;
+          if (seenLogsRef.current.has(key)) return;
+          seenLogsRef.current.add(key);
+          if (line.startsWith('Error:')) {
+            out.push({ id: `log-${idx}`, kind: 'junie', thinkingMs: 200, text: line });
+          } else {
+            out.push({ id: `log-${idx}`, kind: 'activity', label: line, status: 'done', doneValue: 'OK', doneColor: '#59A869' });
+          }
+        });
+        return out;
+      });
+    }
+
+    if (incoming.status && !seenStatusesRef.current.has(incoming.status)) {
+      seenStatusesRef.current.add(incoming.status);
+      const label = STATUS_TO_LABEL[incoming.status];
+      if (label) {
+        setGenFeed(prev => {
+          const id = `status-${incoming.status}`;
+          if (prev.some(p => p.id === id)) return prev;
+          return [...prev, { id, kind: 'activity', label, status: 'searching', doneValue: 'OK', doneColor: '#59A869' }];
+        });
+      }
+    }
+
+    if (incoming.status === 'deployed') {
+      setCurrentStep(3);
+      setIsExpanded(false);
+      setTimeout(() => setState('preview'), 300);
+    }
+    if (incoming.status === 'error') {
+      setTaskError(incoming.error || 'Pipeline failed');
+      setIsExpanded(false);
+      setTimeout(() => setState('error'), 300);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (prompt.trim().length < 5) {
+      shake();
+      setTaskError('Prompt too short. Please provide more details.');
+      setState('error');
+      return;
+    }
+
+    setTask(null);
+    setTaskError('');
+    seenLogsRef.current = new Set();
+    seenStatusesRef.current = new Set();
+    if (cancelPollRef.current) {
+      cancelPollRef.current();
+      cancelPollRef.current = null;
+    }
+    setState('generating');
+
+    try {
+      const created = await createTask(prompt.trim());
+      setTask(prev => ({ ...(prev || {}), id: created.taskId, status: created.status }));
+
+      cancelPollRef.current = pollTask(created.taskId, {
+        onUpdate: ingestTaskUpdate,
+        onError: (err) => {
+          setTaskError(err.message);
+          setIsExpanded(false);
+          setTimeout(() => setState('error'), 300);
+        },
+        intervalMs: 500,
+        timeoutMs: 10 * 60 * 1000,
+      });
+    } catch (err) {
+      setTaskError(err?.message || `Cannot reach backend at ${API_BASE}`);
+      setIsExpanded(false);
+      setTimeout(() => setState('error'), 300);
+    }
+  };
+
+  const handleAccept = async () => {
+    if (!task?.id || accepting) return;
+    setAccepting(true);
+    try {
+      const accepted = await acceptTask(task.id);
+      setTask(accepted);
+      setState('success');
+    } catch (err) {
+      setTaskError(err?.message || 'Failed to push to GitHub');
+      setState('error');
+    } finally {
+      setAccepting(false);
+    }
+  };
 
   const handleDiscard = () => {
+    if (cancelPollRef.current) {
+      cancelPollRef.current();
+      cancelPollRef.current = null;
+    }
     showToast('Environment discarded');
     setIsExpanded(false);
     setTimeout(() => {
       setState('empty');
       setPrompt('');
+      setTask(null);
+      setTaskError('');
     }, 300);
   };
 
   const reset = () => {
+    if (cancelPollRef.current) {
+      cancelPollRef.current();
+      cancelPollRef.current = null;
+    }
     setState('empty');
     setPrompt('');
+    setTask(null);
+    setTaskError('');
   };
+
+  useEffect(() => {
+    return () => {
+      if (cancelPollRef.current) cancelPollRef.current();
+    };
+  }, []);
 
   const getQuickIcon = (label) => {
     if (label.includes('REST API')) return <Zap size={12} color="#FF318C" strokeWidth={2} />;
@@ -989,42 +980,47 @@ export default function JetDevScreen() {
             <View style={styles.previewHeaderCard}>
               <View style={styles.liveRow}>
                 <View style={styles.liveDot} />
-                <Text style={styles.liveText}>● Live on AWS</Text>
+                <Text style={styles.liveText}>● Live preview</Text>
               </View>
-              <Text style={styles.stackText}>Node.js + Express</Text>
-            </View>
-            <View style={styles.pseudoTabs}>
-              {['Preview', 'Logs', 'Files'].map(tab => (
-                <TouchableOpacity key={tab} onPress={() => setPreviewTab(tab)} style={[styles.pseudoTab, previewTab === tab && styles.pseudoTabActive]}>
-                  <Text style={[styles.pseudoTabText, previewTab === tab && styles.pseudoTabTextActive]}>{tab}</Text>
-                </TouchableOpacity>
-              ))}
+              <Text style={styles.stackText}>Vite + React</Text>
             </View>
             <View style={styles.codeBlock}>
               <View style={styles.codeTopBar}>
-                <View style={styles.methodBadge}><Text style={styles.methodBadgeText}>GET</Text></View>
-                <Text style={styles.pathText}>/api/status</Text>
-                <View style={{ flex: 1 }} />
-                <Text style={styles.status200}>200 OK</Text>
-                <Text style={styles.latencyText}>12ms</Text>
+                <View style={styles.methodBadge}><Text style={styles.methodBadgeText}>URL</Text></View>
+                <Text style={styles.pathText} numberOfLines={1}>{task?.previewUrl || '—'}</Text>
               </View>
               <View style={styles.codeDivider} />
-              <Text style={styles.codeLine}><Text style={styles.codeBracket}>{'{'}</Text></Text>
-              <Text style={styles.codeLine}><Text style={styles.codeKey}>  "status"</Text><Text style={styles.codeBracket}>: </Text><Text style={styles.codeString}>"ok"</Text><Text style={styles.codeBracket}>,</Text></Text>
-              <Text style={styles.codeLine}><Text style={styles.codeKey}>  "endpoints"</Text><Text style={styles.codeBracket}>: </Text><Text style={styles.codeNumber}>4</Text><Text style={styles.codeBracket}>,</Text></Text>
-              <Text style={styles.codeLine}><Text style={styles.codeKey}>  "version"</Text><Text style={styles.codeBracket}>: </Text><Text style={styles.codeString}>"1.0.0"</Text></Text>
-              <Text style={styles.codeLine}><Text style={styles.codeBracket}>{'}'}</Text></Text>
+              <Text style={styles.codeLine}><Text style={styles.codeKey}>Task ID</Text><Text style={styles.codeBracket}>: </Text><Text style={styles.codeString}>{task?.id || '—'}</Text></Text>
+              <Text style={styles.codeLine}><Text style={styles.codeKey}>Status </Text><Text style={styles.codeBracket}>: </Text><Text style={styles.codeString}>{task?.status || '—'}</Text></Text>
+              <Text style={styles.codeLine}><Text style={styles.codeKey}>Path   </Text><Text style={styles.codeBracket}>: </Text><Text style={styles.codeString} numberOfLines={1}>{task?.projectPath || '—'}</Text></Text>
             </View>
             <View style={styles.suggestedHeaderRow}>
               <Sparkles size={14} color="#7B52FF" strokeWidth={1.5} style={{ marginRight: 6 }} />
               <Text style={styles.suggestedLabel}>NEXT STEPS</Text>
             </View>
-            <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Add authentication (JWT)</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
-            <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Connect database</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
-            <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Add validation</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
+            <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Open the live preview</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
+            <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Accept to push to GitHub</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
+            <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Open in IntelliJ to keep coding</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
             <View style={styles.actionColumn}>
-              <TouchableOpacity onPress={handleAccept} style={styles.primaryBtn} activeOpacity={0.8}><GitBranch size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} /><Text style={styles.primaryBtnText}>Accept & Commit to Git</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setState('empty')} style={styles.destructiveLink} activeOpacity={0.6}><Text style={styles.destructiveLinkText}>Discard environment</Text></TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => task?.previewUrl && Linking.openURL(task.previewUrl)}
+                disabled={!task?.previewUrl}
+                style={[styles.primaryBtn, { backgroundColor: '#7B52FF', marginBottom: 8, opacity: task?.previewUrl ? 1 : 0.5 }]}
+                activeOpacity={0.8}
+              >
+                <ExternalLink size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} />
+                <Text style={styles.primaryBtnText}>Open Preview</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleAccept}
+                disabled={accepting}
+                style={[styles.primaryBtn, accepting && { opacity: 0.6 }]}
+                activeOpacity={0.8}
+              >
+                <GitBranch size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} />
+                <Text style={styles.primaryBtnText}>{accepting ? 'Pushing…' : 'Accept & Commit to Git'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleDiscard} style={styles.destructiveLink} activeOpacity={0.6}><Text style={styles.destructiveLinkText}>Discard environment</Text></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1038,19 +1034,39 @@ export default function JetDevScreen() {
             <Text style={styles.successTitle}>Committed to GitHub</Text>
             <Text style={styles.successSubtitle}>The codebase is ready for collaboration.</Text>
             <View style={styles.githubBox}>
-              <TouchableOpacity onPress={() => Linking.openURL('https://github.com/JetDev-Team/restaurant-api')} style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+              <TouchableOpacity
+                onPress={() => task?.repoUrl && Linking.openURL(task.repoUrl)}
+                style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+              >
                 <GitHubIcon size={16} color={JB.text1} />
-                <Text style={styles.githubBoxUrl}>github.com/JetDev-Team/restaurant-api</Text>
+                <Text style={styles.githubBoxUrl} numberOfLines={1}>
+                  {task?.repoUrl ? task.repoUrl.replace(/^https?:\/\//, '') : '—'}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => { showToast('URL copied to clipboard'); setCopyFlash(true); setTimeout(() => setCopyFlash(false), 500); }}>
                 <Copy size={14} color={copyFlash ? "#0060FF" : "#ABABAB"} strokeWidth={1.5} />
               </TouchableOpacity>
             </View>
             <View style={styles.infoRow}>
-              <View style={styles.infoCell}><Text style={styles.infoLabel}>STACK</Text><Text style={styles.infoValue}>Node.js + Express</Text></View>
-              <View style={styles.infoCell}><Text style={styles.infoLabel}>CREATED</Text><Text style={styles.infoValue}>just now</Text></View>
+              <View style={styles.infoCell}><Text style={styles.infoLabel}>BRANCH</Text><Text style={styles.infoValue} numberOfLines={1}>{task?.branch || '—'}</Text></View>
+              <View style={styles.infoCell}><Text style={styles.infoLabel}>STATUS</Text><Text style={styles.infoValue}>{task?.status || '—'}</Text></View>
             </View>
-            <TouchableOpacity onPress={() => Linking.openURL('https://github.com/JetDev-Team/restaurant-api')} style={[styles.primaryBtn, { width: '100%', marginBottom: 8 }]} activeOpacity={0.8}><Text style={styles.primaryBtnText}>Open in Browser</Text></TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => task?.branchUrl && Linking.openURL(task.branchUrl)}
+              disabled={!task?.branchUrl}
+              style={[styles.primaryBtn, { width: '100%', marginBottom: 8, opacity: task?.branchUrl ? 1 : 0.5 }]}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.primaryBtnText}>Open in Browser</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => task?.intellijUrl && Linking.openURL(task.intellijUrl)}
+              disabled={!task?.intellijUrl}
+              style={[styles.primaryBtn, { backgroundColor: '#19191C', width: '100%', marginBottom: 8, opacity: task?.intellijUrl ? 1 : 0.5 }]}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.primaryBtnText}>Open in IntelliJ</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={reset} style={styles.flatLink}><Text style={styles.flatLinkText}>Build something new</Text></TouchableOpacity>
           </View>
         </View>
@@ -1065,10 +1081,10 @@ export default function JetDevScreen() {
               <View style={styles.errorSquare}><TriangleAlert size={28} color="#CC0000" strokeWidth={1.5} fill="none" /></View>
               <Text style={styles.errorTitle}>Generation failed</Text>
               <View style={styles.errorBox}>
-                <Text style={styles.errorBoxText}>{prompt.length < 5 && prompt.length > 0 ? "Error: Prompt too short.\nPlease provide more details." : "Error: Connection timeout (30s)\nCheck network and try again."}</Text>
+                <Text style={styles.errorBoxText}>{taskError || `Error reaching backend at ${API_BASE}`}</Text>
               </View>
               <TouchableOpacity onPress={handleGenerate} style={[styles.primaryBtn, { width: '100%', marginTop: 24, marginBottom: 8 }]} activeOpacity={0.8}><Text style={styles.primaryBtnText}>Try again</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setState('empty')} style={styles.flatLink}><Text style={styles.flatLinkText}>Edit prompt</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setState('empty'); setTaskError(''); }} style={styles.flatLink}><Text style={styles.flatLinkText}>Edit prompt</Text></TouchableOpacity>
             </View>
           </View>
         </View>
