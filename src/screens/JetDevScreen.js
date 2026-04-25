@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, createElement } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated as RNAnimated, Easing, Modal, Linking, Platform, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -54,6 +54,36 @@ const previewFiles = [
 ];
 
 const deployedUrl = 'https://restaurant-api.jetdev.app';
+
+/** WebView solo existe en iOS/Android; en Expo Web hay que usar <iframe>. */
+function PreviewEmbed({ uri, renderLoading }) {
+  if (!uri) {
+    return <View style={{ flex: 1 }} />;
+  }
+  if (Platform.OS === 'web') {
+    return (
+      <View style={{ flex: 1, minHeight: 1 }}>
+        {createElement('iframe', {
+          title: 'JetDev preview',
+          src: uri,
+          allow: 'fullscreen',
+          style: { border: 'none', width: '100%', height: '100%', display: 'block' },
+        })}
+      </View>
+    );
+  }
+  return (
+    <WebView
+      source={{ uri }}
+      style={{ flex: 1 }}
+      scrollEnabled
+      showsVerticalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false}
+      startInLoadingState
+      renderLoading={renderLoading}
+    />
+  );
+}
 
 const ProjectCard = ({ proj }) => {
   const isLive = proj.status === 'active' || proj.status === 'live';
@@ -998,13 +1028,8 @@ export default function JetDevScreen() {
                       </View>
 
                       {!!(task?.previewUrl || deployedUrl) ? (
-                        <WebView
-                          source={{ uri: task?.previewUrl || deployedUrl }}
-                          style={{ flex: 1 }}
-                          scrollEnabled={true}
-                          showsVerticalScrollIndicator={false}
-                          showsHorizontalScrollIndicator={false}
-                          startInLoadingState={true}
+                        <PreviewEmbed
+                          uri={task?.previewUrl || deployedUrl}
                           renderLoading={() => (
                             <View style={styles.webLoading}>
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
