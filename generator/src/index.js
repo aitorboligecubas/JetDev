@@ -116,21 +116,29 @@ function runJunie(enhancedPrompt, projectPath) {
   if (!apiKey) return false; 
 
   try {
-    const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
-    const result = spawnSync(npxCmd, [
-      "junie", 
-      `--auth=${apiKey}`, 
-      `--project=${projectPath}`, 
-      enhancedPrompt
-    ], {
+    console.log("   → Conectando nativamente a Engine Junie CLI...");
+    
+    // Windows usará npx.cmd, pero tu WSL Linux usará la instalación pura de JetBrains EAP ('junie')
+    const cmd = process.platform === "win32" ? "npx.cmd" : "junie";
+    const args = process.platform === "win32" 
+      ? ["junie", `--auth=${apiKey}`, `--project=${projectPath}`, enhancedPrompt]
+      : [`--auth=${apiKey}`, `--project=${projectPath}`, enhancedPrompt];
+
+    const result = spawnSync(cmd, args, {
       cwd: projectPath,
-      stdio: "pipe", // Silenciar output a menos que haya error fatal
+      stdio: "inherit", // Para que veas todo lo que escupe Junie mientras programa
       timeout: 180000,
     });
 
-    if (result.error) return false;
-    // Si cruje por el bug del shim (status != 0), lo detectamos sin romperlo todo:
-    if (result.status !== 0) return false;
+    if (result.error) {
+      console.log(`   ⚠ Error interno ejecutando Junie: ${result.error.message}`);
+      return false;
+    }
+    
+    if (result.status !== 0) {
+      console.log(`   ⚠ Junie abortado con código ${result.status}`);
+      return false;
+    }
 
     const appJsx = fs.readFileSync(path.join(projectPath, "src", "App.jsx"), "utf-8");
     if (appJsx.includes("JetDev Template")) {
