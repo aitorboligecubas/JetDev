@@ -122,16 +122,20 @@ const JUNIE_CLI_JS = path.join(
   "index.js"
 );
 
+/** En Windows el instalador oficial pone `junie.bat` aquí; el paquete npm solo busca `junie` sin extensión y falla. */
+const JUNIE_WIN_SHIM = path.join(os.homedir(), ".local", "bin", "junie.bat");
+
 /**
- * En Windows, spawnSync("npx.cmd", ...) a menudo devuelve EINVAL (bug/limit de Node con .cmd).
- * Siempre usamos: node <repo>/node_modules/@jetbrains/junie-cli/bin/index.js
- *
- * Además, el postinstall de @jetbrains/junie-cli en win32 no descarga el binario; hace falta
- * el instalador oficial: https://junie.jetbrains.com (script PowerShell en la doc).
+ * - Windows: si existe `junie.bat` del instalador JetBrains, lo ejecutamos directamente
+ *   (el wrapper npm busca un fichero `junie` sin extensión → "Shim not found" con solo .bat).
+ * - Linux/mac: `node …/@jetbrains/junie-cli/bin/index.js` (el postinstall pone el shim `~/.local/bin/junie`).
  */
 function runJunie(enhancedPrompt, projectPath) {
   const apiKey = process.env.JUNIE_API_KEY;
   if (!apiKey) return false;
+
+  const userJunieShim = path.join(os.homedir(), ".local", "bin", "junie");
+  const passThroughArgs = [`--auth=${apiKey}`, `--project=${projectPath}`, enhancedPrompt];
 
   if (!fs.existsSync(JUNIE_CLI_JS)) {
     console.log(`   ⚠ No está instalado @jetbrains/junie-cli: ${JUNIE_CLI_JS}`);
@@ -139,22 +143,36 @@ function runJunie(enhancedPrompt, projectPath) {
     return false;
   }
 
-  const junieArgs = [
-    JUNIE_CLI_JS,
-    `--auth=${apiKey}`,
-    `--project=${projectPath}`,
-    enhancedPrompt,
-  ];
+  let result;
 
   try {
-    console.log("   → Lanzando Junie CLI (node, sin npx)…");
-
-    const result = spawnSync(process.execPath, junieArgs, {
-      cwd: projectPath,
-      stdio: "inherit",
-      timeout: 180000,
-      windowsHide: true,
-    });
+    if (process.platform === "win32" && fs.existsSync(JUNIE_WIN_SHIM)) {
+      console.log("   → Lanzando Junie CLI (junie.bat del instalador JetBrains)…");
+      result = spawnSync(JUNIE_WIN_SHIM, passThroughArgs, {
+        cwd: projectPath,
+        stdio: "inherit",
+        timeout: 180000,
+        windowsHide: true,
+        shell: true,
+      });
+    } else if (fs.existsSync(userJunieShim)) {
+      console.log("   → Lanzando Junie CLI (shim en ~/.local/bin/junie)…");
+      result = spawnSync(userJunieShim, passThroughArgs, {
+        cwd: projectPath,
+        stdio: "inherit",
+        timeout: 180000,
+        windowsHide: true,
+      });
+    } else {
+      console.log("   → Lanzando Junie CLI (node + paquete @jetbrains/junie-cli)…");
+      const junieArgs = [JUNIE_CLI_JS, ...passThroughArgs];
+      result = spawnSync(process.execPath, junieArgs, {
+        cwd: projectPath,
+        stdio: "inherit",
+        timeout: 180000,
+        windowsHide: true,
+      });
+    }
 
     if (result.error) {
       console.log(`   ⚠ Error interno ejecutando Junie: ${result.error.message}`);
