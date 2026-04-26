@@ -3,8 +3,40 @@ import { Router } from 'express';
 import { getTask, listTasks, deleteTask, updateTask, addLog, failTask } from '../store/tasks.js';
 import { TASK_STATES } from '../utils/states.js';
 import { pushToGitHub } from '../services/github.js';
+import { logger } from '../utils/logger.js';
 
 const router = Router();
+
+/**
+ * Run pushToGitHub in the background and persist the outcome on the task. We
+ * deliberately don't await this from the request handler so the UI gets an
+ * immediate `pushing` response and can poll for the final status.
+ */
+async function runPushInBackground(taskId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  try {
+    const gitResult = await pushToGitHub({
+      projectPath: task.projectPath,
+      taskId: task.id,
+      prompt: task.prompt,
+    });
+    if (!gitResult?.repoUrl || !gitResult?.branch || !gitResult?.branchUrl) {
+      throw new Error('pushToGitHub returned an invalid result');
+    }
+    updateTask(taskId, {
+      status: TASK_STATES.ACCEPTED,
+      repoUrl: gitResult.repoUrl,
+      branch: gitResult.branch,
+      branchUrl: gitResult.branchUrl,
+      intellijUrl: gitResult.intellijUrl ?? null,
+    });
+    addLog(taskId, 'Accepted', { level: 'success' });
+  } catch (err) {
+    logger.error(`[tasks] background push failed for ${taskId}: ${err.message}`);
+    failTask(taskId, err);
+  }
+}
 
 router.get('/tasks', (req, res) => {
   res.json({ tasks: listTasks() });
@@ -28,7 +60,7 @@ router.delete('/task/:taskId', (req, res) => {
   return res.status(204).end();
 });
 
-router.post('/task/:taskId/accept', async (req, res, next) => {
+router.post('/task/:taskId/accept', (req, res, next) => {
   try {
     const { taskId } = req.params;
     const task = getTask(taskId);
@@ -47,32 +79,19 @@ router.post('/task/:taskId/accept', async (req, res, next) => {
       });
     }
 
-    updateTask(taskId, { status: TASK_STATES.PUSHING, error: null });
+    // Flip to pushing synchronously so the polling client sees the new status
+    // immediately, then run the actual git work in the background. The client
+    // resumes polling and renders 'accepted' / 'error' when the push lands.
+    const updated = updateTask(taskId, { status: TASK_STATES.PUSHING, error: null });
     addLog(taskId, 'Pushing to GitHub');
 
-    try {
-      const gitResult = await pushToGitHub({
-        projectPath: task.projectPath,
-        taskId: task.id,
-        prompt: task.prompt,
+    setImmediate(() => {
+      runPushInBackground(taskId).catch((err) => {
+        logger.error(`[tasks] runPushInBackground threw for ${taskId}: ${err?.message}`);
       });
-      if (!gitResult?.repoUrl || !gitResult?.branch || !gitResult?.branchUrl) {
-        throw new Error('pushToGitHub returned an invalid result');
-      }
+    });
 
-      const updated = updateTask(taskId, {
-        status: TASK_STATES.ACCEPTED,
-        repoUrl: gitResult.repoUrl,
-        branch: gitResult.branch,
-        branchUrl: gitResult.branchUrl,
-        intellijUrl: gitResult.intellijUrl ?? null,
-      });
-      addLog(taskId, 'Accepted');
-      return res.json(updated);
-    } catch (err) {
-      const failed = failTask(taskId, err);
-      return res.status(500).json(failed);
-    }
+    return res.status(202).json(updated);
   } catch (err) {
     return next(err);
   }
