@@ -14,17 +14,35 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.expo-temp"
+      "bundleIdentifier": "com.anonymous.expo-temp",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "JetDev necesita reconocimiento de voz para transcribir tu idea.",
+        "NSMicrophoneUsageDescription": "JetDev necesita acceso al micrófono para transcribir tu idea."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.expotemp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "JetDev necesita acceso al micrófono para transcribir tu idea.",
+          "speechRecognitionPermission": "JetDev necesita reconocimiento de voz para transcribir tu idea."
+        }
+      ]
+    ]
   }
 }

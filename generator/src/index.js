@@ -23,7 +23,7 @@ const path = require("path");
 const http = require("http");
 const net = require("net");
 const os = require("node:os");
-const { execSync, spawnSync } = require("child_process");
+const { execSync, spawnSync, spawn } = require("child_process");
 
 // Load .env from generator folder
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
@@ -146,82 +146,85 @@ function buildJunieEnv(apiKey, projectPath, enhancedPrompt) {
  * - Windows: `cmd /c call junie.bat` sin argumentos (tarea en env), sin `shell: true` en el .bat.
  * - macOS/Linux: shim `~/.local/bin/junie` o `node` + paquete npm, mismo env, argv vacío.
  */
-function runJunie(enhancedPrompt, projectPath) {
-  const apiKey = process.env.JUNIE_API_KEY;
-  if (!apiKey) return false;
+function runJunie(enhancedPrompt, projectPath, logToClient) {
+  return new Promise((resolve) => {
+    const apiKey = process.env.JUNIE_API_KEY;
+    if (!apiKey) return resolve(false);
 
-  const userJunieShim = path.join(os.homedir(), ".local", "bin", "junie");
-  const env = buildJunieEnv(apiKey, projectPath, enhancedPrompt);
+    const userJunieShim = path.join(os.homedir(), ".local", "bin", "junie");
+    const env = buildJunieEnv(apiKey, projectPath, enhancedPrompt);
 
-  const childOpts = {
-    cwd: projectPath,
-    /** stdin ignorado = no TTY → una sola tarea, sin menú "What shall we build" */
-    stdio: ["ignore", "inherit", "inherit"],
-    timeout: 180000,
-    env,
-  };
+    const childOpts = {
+      cwd: projectPath,
+      stdio: ["ignore", "pipe", "pipe"],
+      env,
+    };
 
-  if (!fs.existsSync(JUNIE_CLI_JS)) {
-    console.log(`   ⚠ No está instalado @jetbrains/junie-cli: ${JUNIE_CLI_JS}`);
-    console.log("   → Ejecuta: cd generator && npm install");
-    return false;
-  }
-
-  let result;
-
-  try {
-    if (process.platform === "win32" && fs.existsSync(JUNIE_WIN_SHIM)) {
-      console.log("   → Junie CLI (headless, tarea vía JUNIE_TASK en env) — junie.bat…");
-      result = spawnSync("cmd.exe", ["/c", "call", JUNIE_WIN_SHIM], {
-        ...childOpts,
-        windowsHide: true,
-      });
-    } else if (fs.existsSync(userJunieShim)) {
-      console.log("   → Junie CLI (headless, tarea vía JUNIE_TASK) — shim ~/.local/bin/junie…");
-      result = spawnSync(userJunieShim, [], {
-        ...childOpts,
-        windowsHide: true,
-      });
-    } else {
-      console.log("   → Junie CLI (headless) — node + @jetbrains/junie-cli…");
-      result = spawnSync(process.execPath, [JUNIE_CLI_JS], {
-        ...childOpts,
-        windowsHide: true,
-      });
+    if (!fs.existsSync(JUNIE_CLI_JS)) {
+      console.log(`   ⚠ No está instalado @jetbrains/junie-cli: ${JUNIE_CLI_JS}`);
+      console.log("   → Ejecuta: cd generator && npm install");
+      return resolve(false);
     }
 
-    if (result.error) {
-      console.log(`   ⚠ Error interno ejecutando Junie: ${result.error.message}`);
-      if (process.platform === "win32") {
-        console.log(
-          "   ℹ En Windows, instala el binario de Junie con el script oficial (PowerShell) desde:\n" +
-            "     https://www.jetbrains.com/help/junie/junie-cli.html"
-        );
+    let child;
+    try {
+      if (process.platform === "win32" && fs.existsSync(JUNIE_WIN_SHIM)) {
+        console.log("   → Junie CLI (headless, tarea vía JUNIE_TASK en env) — junie.bat…");
+        child = spawn("cmd.exe", ["/c", "call", JUNIE_WIN_SHIM], childOpts);
+      } else if (fs.existsSync(userJunieShim)) {
+        console.log("   → Junie CLI (headless, tarea vía JUNIE_TASK) — shim ~/.local/bin/junie…");
+        child = spawn(userJunieShim, [], childOpts);
+      } else {
+        console.log("   → Junie CLI (headless) — node + @jetbrains/junie-cli…");
+        child = spawn(process.execPath, [JUNIE_CLI_JS], childOpts);
       }
-      return false;
-    }
 
-    if (result.status !== 0) {
-      console.log(`   ⚠ Junie abortado con código ${result.status}`);
-      if (process.platform === "win32") {
-        console.log(
-          "   ℹ Si ves \"Shim not found\": ejecuta en PowerShell el instalador de JetBrains para Junie CLI, " +
-            "luego comprueba que exista un ejecutable bajo %USERPROFILE%\\.local\\bin"
-        );
+      if (child.stdout) {
+        child.stdout.on("data", (data) => {
+          const str = data.toString();
+          process.stdout.write(str);
+          if (logToClient) logToClient(str);
+        });
       }
-      return false;
-    }
 
-    const appJsx = fs.readFileSync(path.join(projectPath, "src", "App.jsx"), "utf-8");
-    if (appJsx.includes("JetDev Template")) {
-      return false; // Junie fingió éxito pero no editó código
-    }
+      if (child.stderr) {
+        child.stderr.on("data", (data) => {
+          const str = data.toString();
+          process.stderr.write(str);
+          if (logToClient) logToClient(str);
+        });
+      }
 
-    return true; // Éxito completo de Junie
-  } catch (e) {
-    console.log(`   ⚠ Excepción en runJunie: ${e && e.message ? e.message : e}`);
-    return false;
-  }
+      child.on("close", (code) => {
+        if (code !== 0) {
+          console.log(`   ⚠ Junie abortado con código ${code}`);
+          if (process.platform === "win32") {
+            console.log(
+              "   ℹ Si ves \"Shim not found\": ejecuta en PowerShell el instalador de JetBrains para Junie CLI, " +
+                "luego comprueba que exista un ejecutable bajo %USERPROFILE%\\.local\\bin"
+            );
+          }
+          return resolve(false);
+        }
+
+        const appJsx = fs.readFileSync(path.join(projectPath, "src", "App.jsx"), "utf-8");
+        if (appJsx.includes("JetDev Template")) {
+          return resolve(false); // Junie fingió éxito pero no editó código
+        }
+
+        return resolve(true); // Éxito completo de Junie
+      });
+
+      child.on("error", (err) => {
+        console.log(`   ⚠ Error interno ejecutando Junie: ${err.message}`);
+        return resolve(false);
+      });
+
+    } catch (e) {
+      console.log(`   ⚠ Excepción en runJunie: ${e && e.message ? e.message : e}`);
+      return resolve(false);
+    }
+  });
 }
 
 // =============================================================================
@@ -466,7 +469,10 @@ async function generateProject({ prompt, taskId }) {
   let codeSource = "Junie";
   emit("code", "update", "Generating code", "Planning");
   
-  if (!runJunie(enhancedPrompt, projectPath)) {
+  const onLog = arguments?.[0] && typeof arguments[0].onLog === "function" ? arguments[0].onLog : null;
+  const logToClient = (msg) => { if (onLog) onLog(msg); };
+
+  if (!(await runJunie(enhancedPrompt, projectPath, logToClient))) {
     console.log("   ⚠ Junie CLI not available in this OS environment.");
     emit("code", "update", "Generating code", "Drafting changes");
     console.log("   → Seamlessly passing generation task to OpenAI Cloud (100% AI, non-hardcoded)...");
@@ -477,8 +483,12 @@ async function generateProject({ prompt, taskId }) {
   console.log(`   ✅ Original AI code successfully applied to project (${codeSource})`);
   emit("code", "done", "Generating code", codeSource === "Junie" ? "Junie" : "OpenAI");
 
+  const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  await _sleep(800);
+
   // 4: Build
   emit("deps", "start", "Installing dependencies");
+  await _sleep(1200);
   console.log("\n📦 [4/5] Building project...");
   try {
     execSync("npm install", { cwd: projectPath, stdio: "pipe", timeout: 120000 });
@@ -486,8 +496,10 @@ async function generateProject({ prompt, taskId }) {
     throw new Error(`Build failed: ${(e.stderr || e.message).toString().slice(0, 300)}`);
   }
   emit("deps", "done", "Installing dependencies", "npm");
+  await _sleep(750);
 
   emit("build", "start", "Building project");
+  await _sleep(1400);
   try {
     execSync("npm run build", { cwd: projectPath, stdio: "pipe", timeout: 60000 });
   } catch (e) {
@@ -513,21 +525,26 @@ async function generateProject({ prompt, taskId }) {
   }
   console.log("   ✅ Build successful");
   emit("build", "done", "Building project", "Vite");
+  await _sleep(900);
 
   // 5: Deploy
   emit("deploy", "start", "Deploying preview");
+  await _sleep(1600);
   console.log("\n🌐 [5/5] Deploying preview...");
   const previewUrl = await deployPreview(projectPath, taskId);
   console.log(`   ✅ Preview live at ${previewUrl}`);
   emit("deploy", "done", "Deploying preview", "Live");
+  await _sleep(800);
 
   emit("health", "start", "Running health check");
+  await _sleep(1100);
   const hc = await healthCheck(previewUrl);
   if (hc && hc.statusCode) {
     emit("health", "done", "Running health check", `${hc.statusCode} OK · ${hc.ms}ms`);
   } else {
     emit("health", "done", "Running health check", "OK");
   }
+  await _sleep(600);
 
   console.log("\n══════════════════════════════════════════════════");
   console.log(`  ✅ DONE — Task ${taskId}`);

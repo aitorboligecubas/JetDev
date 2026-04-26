@@ -10,6 +10,7 @@ import { JB, Type, Colors } from '../constants/theme';
 import { quickPrompts } from '../constants/data';
 import { createTask, pollTask, acceptTask } from '../api/jetdev';
 import { API_BASE } from '../api/config';
+import { useSpeechToText } from '../hooks/useSpeechToText';
 import Svg, { Path } from 'react-native-svg';
 import {
   Zap, Terminal, GitBranch, CheckCircle,
@@ -18,11 +19,11 @@ import {
   CircleCheck, Sparkles, X,
   Trash2, Lock, Mail, BellOff, Bell, FileCode,
   FolderOpen, Server, Code2, ExternalLink,
-  Plus, Mic, ArrowUp
+  Plus, Mic, ArrowUp, Square, ArrowRight
 } from 'lucide-react-native';
-
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MONO_FONT = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+const AnimatedTouchable = RNAnimated.createAnimatedComponent(TouchableOpacity);
 
 const historyProjects = [
   { id: 1, name: 'Restaurant Booking API', stack: 'Node.js', time: '3 days ago', url: 'github.com/JetDev-Team/rest-api', status: 'live' },
@@ -211,6 +212,20 @@ const ActivityRow = ({ label, subtitle, status, doneValue, doneColor = '#FFFFFF'
   const searchingOpacity = useRef(new RNAnimated.Value(1)).current;
   const valueOpacity = useRef(new RNAnimated.Value(0)).current;
 
+  const [currentSubtitle, setCurrentSubtitle] = useState(subtitle);
+  const subtitleOpacity = useRef(new RNAnimated.Value(1)).current;
+
+  useEffect(() => {
+    if (subtitle && subtitle !== currentSubtitle) {
+      RNAnimated.timing(subtitleOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+        setCurrentSubtitle(subtitle);
+        RNAnimated.timing(subtitleOpacity, { toValue: 1, duration: 250, useNativeDriver: true }).start();
+      });
+    } else if (subtitle && !currentSubtitle) {
+      setCurrentSubtitle(subtitle);
+    }
+  }, [subtitle, currentSubtitle, subtitleOpacity]);
+
   useEffect(() => {
     RNAnimated.parallel([
       RNAnimated.timing(entryOpacity, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
@@ -242,7 +257,11 @@ const ActivityRow = ({ label, subtitle, status, doneValue, doneColor = '#FFFFFF'
           <RNAnimated.Text style={[styles.activityLabel, { opacity: labelOpacity }, status === 'done' ? styles.activityLabelDone : styles.activityLabelActive]}>
             {label}
           </RNAnimated.Text>
-          {subtitle ? <Text style={styles.activitySubtitle} numberOfLines={1}>{subtitle}</Text> : null}
+          {currentSubtitle ? (
+            <RNAnimated.Text style={[styles.activitySubtitle, { opacity: subtitleOpacity }]} numberOfLines={1}>
+              {currentSubtitle}
+            </RNAnimated.Text>
+          ) : null}
         </View>
 
         <View style={styles.activityRight}>
@@ -316,6 +335,45 @@ const JunieLabel = () => (
     <Text style={styles.junieLabelText}>JUNIE</Text>
   </View>
 );
+
+const RecordingWaveform = () => {
+  const bars = [
+    useRef(new RNAnimated.Value(0.3)).current,
+    useRef(new RNAnimated.Value(0.8)).current,
+    useRef(new RNAnimated.Value(0.5)).current,
+    useRef(new RNAnimated.Value(0.9)).current,
+    useRef(new RNAnimated.Value(0.4)).current,
+    useRef(new RNAnimated.Value(0.7)).current,
+  ];
+
+  useEffect(() => {
+    const anims = bars.map((val, i) => {
+      return RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.timing(val, { toValue: 1, duration: 250 + (i * 50), easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+          RNAnimated.timing(val, { toValue: 0.2, duration: 250 + (i * 50), easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+        ])
+      );
+    });
+    anims.forEach(a => a.start());
+    return () => anims.forEach(a => a.stop());
+  }, []);
+
+  return (
+    <View style={styles.waveformContainer}>
+      {bars.map((val, i) => (
+        <RNAnimated.View
+          key={i}
+          style={[styles.waveBar, {
+            height: val.interpolate({ inputRange: [0, 1], outputRange: [6, 20] })
+          }]}
+        >
+          <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+        </RNAnimated.View>
+      ))}
+    </View>
+  );
+};
 
 const JunieMessage = ({ text, thinkingMs = 1200 }) => {
   const thinkingOpacity = useRef(new RNAnimated.Value(1)).current;
@@ -536,6 +594,9 @@ export default function JetDevScreen() {
   const seenLogsRef = useRef(new Set());
   const seenStatusesRef = useRef(new Set());
 
+  const { isListening, transcript, error: speechError, start: startListening, stop: stopListening, cancel: cancelListening } = useSpeechToText({ lang: 'en-US' });
+  const [basePrompt, setBasePrompt] = useState('');
+
   const genScrollRef = useRef(null);
   const genProgress = useRef(new RNAnimated.Value(0)).current;
   const genTimers = useRef([]);
@@ -555,8 +616,35 @@ export default function JetDevScreen() {
   const scrollViewRef = useRef(null);
   
   const shakeAnim = useRef(new RNAnimated.Value(0)).current;
+  const recordingTransition = useRef(new RNAnimated.Value(0)).current;
 
   useEffect(() => { stateRef.current = state; }, [state]);
+
+  useEffect(() => {
+    if (speechError) {
+      showToast(`Mic error: ${speechError}`);
+    }
+  }, [speechError]);
+
+  useEffect(() => {
+    RNAnimated.timing(recordingTransition, {
+      toValue: isListening ? 1 : 0,
+      duration: 400,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [isListening, recordingTransition]);
+
+  useEffect(() => {
+    if (isListening) {
+      setPrompt((basePrompt ? basePrompt + ' ' : '') + transcript);
+    }
+  }, [transcript, isListening, basePrompt]);
+
+  const handleStartListening = () => {
+    setBasePrompt(prompt);
+    startListening();
+  };
 
   useEffect(() => {
     navigation.getParent()?.setOptions({
@@ -705,7 +793,8 @@ export default function JetDevScreen() {
     setGenFeed(prev => {
       const id = `step-${step.key}`;
       const existingIdx = prev.findIndex(p => p.id === id);
-      const nextItem = { id, kind: 'activity', label: step.label, status: nextStatus, doneValue: step.doneValue, doneColor: step.doneColor, ...extra };
+      const nextItem = { id, kind: 'activity', label: step.label, doneValue: step.doneValue, doneColor: step.doneColor, ...extra };
+      if (nextStatus) nextItem.status = nextStatus;
       if (existingIdx === -1) return [...prev, nextItem, { id: `${id}__spacer__${Date.now()}`, kind: 'spacer', h: 6 }];
       const copy = [...prev];
       copy[existingIdx] = { ...copy[existingIdx], ...nextItem };
@@ -792,12 +881,21 @@ export default function JetDevScreen() {
       });
 
       // apply canonical step completions outside the setState(prev=>...) to avoid stale closures
-      incoming.logs.forEach((line) => {
-        if (typeof line !== 'string') return;
-        const trimmed = line.trim();
-        if (trimmed.startsWith('FEED|')) return;
-        const match = LOG_TO_CANONICAL.find(m => m.re.test(trimmed));
-        if (match) upsertFeedStep(match.step, 'done');
+      incoming.logs.forEach((chunk) => {
+        if (typeof chunk !== 'string') return;
+        
+        const lines = chunk.split('\n');
+        lines.forEach(line => {
+          const noAnsi = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+          const trimmed = noAnsi.trim();
+          if (!trimmed) return;
+          if (trimmed.startsWith('FEED|')) return;
+          
+          const match = LOG_TO_CANONICAL.find(m => m.re.test(trimmed));
+          if (match) {
+            upsertFeedStep(match.step, 'done');
+          }
+        });
       });
     }
 
@@ -848,8 +946,7 @@ export default function JetDevScreen() {
   const handleGenerate = async () => {
     if (prompt.trim().length < 5) {
       shake();
-      setTaskError('Prompt too short. Please provide more details.');
-      setState('error');
+      showToast('Please provide more details to generate.');
       return;
     }
 
@@ -928,6 +1025,28 @@ export default function JetDevScreen() {
     setTaskError('');
   };
 
+  // Premium Hardcoded AI Generator Sequence
+  useEffect(() => {
+    if (task?.status === 'generating') {
+      const steps = [
+        "Analyzing architecture...",
+        "Scaffolding React components...",
+        "Writing business logic...",
+        "Wiring interactive elements...",
+        "Refining responsive layout...",
+        "Finalizing UI polish..."
+      ];
+      let stepIdx = 0;
+      const interval = setInterval(() => {
+        if (stepIdx < steps.length) {
+          upsertFeedStep(CANONICAL.generating, null, { subtitle: steps[stepIdx] });
+          stepIdx++;
+        }
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [task?.status]);
+
   useEffect(() => {
     return () => {
       if (cancelPollRef.current) cancelPollRef.current();
@@ -974,7 +1093,9 @@ export default function JetDevScreen() {
       {(state === 'empty' || state === 'generating') && (
         <View style={styles.emptyState}>
           <JetDevHeroGradient isFullscreen={false}>
-            <Text style={styles.heroSubtitle}>Describe what you want. Junie builds it in the cloud.</Text>
+            <Text style={styles.heroSubtitle} numberOfLines={1} adjustsFontSizeToFit>
+              Describe what you want. <Text style={{ fontWeight: '600', color: '#FFFFFF' }}>Junie builds it in the cloud.</Text>
+            </Text>
             <RNAnimated.View style={{ transform: [{ translateX: shakeAnim }], width: '100%' }}>
               <View style={styles.heroInputWrapper}>
                 <TextInput
@@ -982,14 +1103,83 @@ export default function JetDevScreen() {
                   value={prompt}
                   onChangeText={setPrompt}
                   placeholder="Describe your app idea..."
-                  placeholderTextColor="rgba(255, 255, 255, 0.42)"
+                  placeholderTextColor="rgba(255, 255, 255, 0.6)"
                   multiline
                   style={styles.heroTextarea}
                 />
-                <TouchableOpacity onPress={handleGenerate} style={styles.heroInnerBtn} activeOpacity={0.8}>
-                  <Zap size={14} color="#19191C" strokeWidth={2.5} fill="none" />
-                  <Text style={styles.heroInnerBtnText}>Generate</Text>
-                </TouchableOpacity>
+                <View style={[styles.heroActionRow, { position: 'relative', height: 40 }]} pointerEvents="box-none">
+                  
+                  {/* RECORDING UI (Left aligned) */}
+                  <RNAnimated.View style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    opacity: recordingTransition,
+                    pointerEvents: isListening ? 'auto' : 'none',
+                    transform: [{ translateX: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }]
+                  }}>
+                    <View style={styles.recordingDotWrap}>
+                      <View style={styles.recordingDot} />
+                    </View>
+                    <RecordingWaveform />
+                    <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '400', letterSpacing: -0.1 }}>
+                      Listening...<Text style={{ color: '#FF318C', fontWeight: '300' }}>|</Text>
+                    </Text>
+                  </RNAnimated.View>
+
+                  {/* MIC / STOP BUTTON */}
+                  <RNAnimated.View style={{ 
+                    transform: [{ translateX: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [-126, 0] }) }],
+                    zIndex: 20
+                  }}>
+                    <AnimatedTouchable 
+                      style={[
+                        styles.heroMicBtn, 
+                        { 
+                          backgroundColor: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.1)', '#FF318C'] }),
+                          borderColor: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.15)', '#FF318C'] }),
+                          borderTopColor: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.3)', '#FF318C'] }),
+                          shadowColor: '#FF318C',
+                          shadowOpacity: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [0, 0.4] }),
+                          shadowRadius: 12,
+                          shadowOffset: { width: 0, height: 4 },
+                          elevation: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [0, 6] }),
+                        }
+                      ]} 
+                      activeOpacity={0.85} 
+                      onPress={isListening ? stopListening : handleStartListening}
+                    >
+                      <RNAnimated.View style={{ position: 'absolute', opacity: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }}>
+                        <Mic size={18} color="#FFF" />
+                      </RNAnimated.View>
+                      <RNAnimated.View style={{ position: 'absolute', opacity: recordingTransition }}>
+                        <Square size={14} color="#FFF" fill="#FFF" />
+                      </RNAnimated.View>
+                    </AnimatedTouchable>
+                  </RNAnimated.View>
+
+                  {/* GENERATE BUTTON */}
+                  <RNAnimated.View style={{ 
+                    position: 'absolute',
+                    right: 0,
+                    opacity: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+                    transform: [{ translateY: recordingTransition.interpolate({ inputRange: [0, 1], outputRange: [0, 10] }) }],
+                    pointerEvents: isListening ? 'none' : 'auto'
+                  }}>
+                    <TouchableOpacity 
+                      onPress={handleGenerate} 
+                      style={[styles.heroInnerBtn, prompt.trim().length === 0 && { opacity: 0.6 }]} 
+                      activeOpacity={0.8}
+                    >
+                      <Zap size={13} color="#19191C" strokeWidth={2.5} fill="none" />
+                      <Text style={styles.heroInnerBtnText}>Generate</Text>
+                    </TouchableOpacity>
+                  </RNAnimated.View>
+                </View>
               </View>
             </RNAnimated.View>
           </JetDevHeroGradient>
@@ -1029,10 +1219,10 @@ export default function JetDevScreen() {
             <TouchableOpacity onPress={handleDiscard} style={styles.genCloseBtn}>
               <X size={16} color="#19191C" />
             </TouchableOpacity>
-            <Text style={styles.genProjectName}>Restaurant Booking API</Text>
-            <View style={styles.genStackTag}>
-              <Text style={styles.genStackTagText}>Node.js</Text>
-            </View>
+            <Text style={[styles.genProjectName, { flex: 1, textAlign: 'center', marginHorizontal: 12 }]} numberOfLines={1}>
+              {basePrompt || 'New Project'}
+            </Text>
+            <View style={{ width: 32 }} />
           </View>
 
           <View style={styles.genStepper}>
@@ -1095,10 +1285,6 @@ export default function JetDevScreen() {
                   </View>
                   <Text style={styles.genLiveText}>Live on AWS</Text>
                 </View>
-
-                <View style={styles.genStatusStackPill}>
-                  <Text style={styles.genStatusStackText}>Node.js + Express</Text>
-                </View>
               </View>
 
               {/* TABS */}
@@ -1130,12 +1316,22 @@ export default function JetDevScreen() {
                         <View style={styles.chromeDot2} />
                         <View style={styles.chromeDot3} />
 
-                        <View style={styles.urlBar}>
-                          <Lock size={9} color="#8A8A8A" strokeWidth={2.6} />
-                          <Text style={styles.urlText} numberOfLines={1}>
-                            {(task?.previewUrl || deployedUrl).replace(/^https?:\/\//, '')}
+                        <TouchableOpacity 
+                          style={styles.urlBar}
+                          activeOpacity={0.6}
+                          onPress={() => {
+                            const url = task?.previewUrl || deployedUrl;
+                            if (url) {
+                              const target = url.startsWith('http') ? url : `http://${url}`;
+                              Linking.openURL(target);
+                            }
+                          }}
+                        >
+                          <Text style={[styles.urlText, { color: '#19191C', fontWeight: '500' }]} numberOfLines={1}>
+                            View Website
                           </Text>
-                        </View>
+                          <ArrowRight size={12} color="#19191C" strokeWidth={2.6} />
+                        </TouchableOpacity>
                       </View>
 
                       {!!(task?.previewUrl || deployedUrl) ? (
@@ -1291,8 +1487,8 @@ export default function JetDevScreen() {
                 contentContainerStyle={[styles.genFeedContent, { paddingBottom: insets.bottom + 8 + 88 }]}
                 showsVerticalScrollIndicator={false}
               >
-                {genFeed.map((item, idx) => {
-                  const prev = genFeed[idx - 1];
+                {genFeed.filter(i => i.kind !== 'junie').map((item, idx, filteredArr) => {
+                  const prev = filteredArr[idx - 1];
                   const shouldInsertDivider =
                     item.kind !== 'activity' && (idx === 0 || prev?.kind === 'activity');
 
@@ -1308,14 +1504,7 @@ export default function JetDevScreen() {
                       />
                     );
                   }
-                  if (item.kind === 'junie') {
-                    return (
-                      <View key={item.id}>
-                        {shouldInsertDivider ? <View style={styles.feedSectionDivider} /> : null}
-                        <JunieMessage text={item.text} thinkingMs={item.thinkingMs ?? 1200} />
-                      </View>
-                    );
-                  }
+
                   if (item.kind === 'user') {
                     return (
                       <View key={item.id}>
@@ -1341,10 +1530,13 @@ export default function JetDevScreen() {
               </ScrollView>
 
               {/* INPUT BAR */}
-              <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+              <View style={[styles.inputBar, { paddingBottom: insets.bottom + 12 }]}>
+                <View style={styles.inputBarGradientBorder}>
+                  <LinearGradient colors={['rgba(255,49,140,0.4)', 'rgba(123,82,255,0.4)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                </View>
                 <View style={styles.inputRow}>
                   <TouchableOpacity style={styles.inputIconBtn} activeOpacity={0.85}>
-                    <Plus size={18} color="rgba(25,25,28,0.55)" />
+                    <Plus size={20} color="rgba(25,25,28,0.55)" />
                   </TouchableOpacity>
 
                   <View style={styles.inputFieldWrap}>
@@ -1352,13 +1544,13 @@ export default function JetDevScreen() {
                       value={genInput}
                       onChangeText={setGenInput}
                       placeholder="Ask Junie anything..."
-                      placeholderTextColor="rgba(25,25,28,0.35)"
+                      placeholderTextColor="rgba(25,25,28,0.45)"
                       style={styles.inputText}
                       multiline
-                      maxHeight={80}
+                      maxHeight={120}
                     />
                     <TouchableOpacity style={styles.inputInnerMic} activeOpacity={0.85} onPress={() => showToast('Coming soon')}>
-                      <Mic size={18} color="rgba(25,25,28,0.45)" />
+                      <Mic size={20} color="rgba(25,25,28,0.55)" />
                     </TouchableOpacity>
                   </View>
 
@@ -1380,9 +1572,9 @@ export default function JetDevScreen() {
                       onPress={hasSendText ? handleSend : () => showToast('Coming soon')}
                     >
                       {hasSendText ? (
-                        <ArrowUp size={18} color="#FFFFFF" />
+                        <ArrowUp size={20} color="#FFFFFF" />
                       ) : (
-                        <Zap size={18} color="rgba(25,25,28,0.45)" />
+                        <Zap size={20} color="rgba(25,25,28,0.45)" />
                       )}
                     </TouchableOpacity>
                   </RNAnimated.View>
@@ -1402,7 +1594,6 @@ export default function JetDevScreen() {
                 <View style={styles.liveDot} />
                 <Text style={styles.liveText}>● Live on AWS</Text>
               </View>
-              <Text style={styles.stackText}>Node.js + Express</Text>
             </View>
             <View style={styles.pseudoTabs}>
               {['Preview', 'Logs', 'Files'].map(tab => (
@@ -1552,17 +1743,103 @@ const styles = StyleSheet.create({
   tagBlueText: { fontSize: 11, fontWeight: '600', color: JB.blue },
 
   /* Empty State / Hero */
-  emptyState: { paddingTop: 8 },
-  heroContainer: { borderRadius: 20, overflow: 'hidden', marginHorizontal: 16, marginBottom: 24, minHeight: 220, position: 'relative' },
+  emptyState: { paddingTop: 16 },
+  heroContainer: { borderRadius: 28, overflow: 'hidden', marginHorizontal: 16, marginBottom: 24, minHeight: 260, position: 'relative' },
   heroContainerFullscreen: { marginHorizontal: 0, marginTop: 0, marginBottom: 0, borderRadius: 0, flex: 1 },
-  heroContent: { padding: 20, zIndex: 10 },
+  heroContent: { padding: 24, zIndex: 10, flex: 1, justifyContent: 'center' },
   heroContentFullscreen: { flex: 1, padding: 0 },
-  heroSubtitle: { color: 'rgba(255,255,255,0.75)', fontSize: 14, lineHeight: 20, marginBottom: 12 },
-  heroInputWrapper: { position: 'relative', width: '100%' },
-  heroTextarea: { backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.22)', borderWidth: 1, borderRadius: 16, padding: 14, paddingBottom: 48, minHeight: 120, fontSize: 15, color: '#FFFFFF', textAlignVertical: 'top' },
-  heroInnerBtn: { position: 'absolute', bottom: 10, right: 10, backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: 12, height: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  heroInnerBtnText: { color: '#19191C', fontSize: 13, fontWeight: '700' },
-  quickRow: { paddingHorizontal: 16, marginBottom: 24 },
+  heroSubtitle: { color: 'rgba(255,255,255,0.75)', fontSize: 13.5, marginBottom: 16, textAlign: 'center', fontWeight: '400', letterSpacing: -0.2 },
+  
+  heroInputWrapper: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderTopColor: 'rgba(255,255,255,0.25)',
+    borderLeftColor: 'rgba(255,255,255,0.18)',
+    padding: 24,
+    paddingTop: 28,
+    minHeight: 160,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.2,
+    shadowRadius: 32,
+  },
+  heroTextarea: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    padding: 0,
+    marginBottom: 24,
+    lineHeight: 22,
+    fontWeight: '400',
+    letterSpacing: -0.1,
+  },
+  heroActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 'auto',
+  },
+  heroMicBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderTopColor: 'rgba(255,255,255,0.3)',
+  },
+  heroInnerBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    height: 40,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+  },
+  heroInnerBtnText: { color: '#19191C', fontSize: 14, fontWeight: '700' },
+
+  heroRecordingContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  heroRecordingTranscript: {
+    flex: 1,
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '400',
+    lineHeight: 22,
+    letterSpacing: -0.1,
+  },
+  heroRecordingCursor: { color: '#FF318C', fontWeight: '300', fontSize: 15 },
+  heroMicBtnActive: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FF318C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FF318C',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+
+  quickRow: { paddingHorizontal: 16, marginBottom: 24, marginTop: 8 },
   quickChip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: JB.bg1, borderRadius: 6, borderWidth: 1, borderColor: JB.border, paddingHorizontal: 12, paddingVertical: 6, height: 30, justifyContent: 'center' },
   quickChipText: { fontSize: 12, fontWeight: '500', color: JB.text1 },
   recentSection: { paddingHorizontal: 16, marginTop: 8 },
@@ -1731,7 +2008,7 @@ const styles = StyleSheet.create({
   activityValueGradientMask: { fontSize: 13, fontWeight: '600', letterSpacing: 0.1, textAlign: 'right', backgroundColor: 'transparent' },
 
   junieBlock: { width: '100%', marginTop: 4 },
-  junieLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 20, marginBottom: 8, marginTop: 4 },
+  junieLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 20, marginBottom: 2, marginTop: 4 },
   junieLabelText: { fontSize: 11, fontWeight: '700', color: '#FF318C', letterSpacing: 0.8, textTransform: 'uppercase' },
   junieBubble: {
     alignSelf: 'flex-start',
@@ -1792,17 +2069,20 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
+    borderTopWidth: 0,
   },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  inputBarGradientBorder: {
+    height: 1.5,
+    position: 'absolute', top: 0, left: 0, right: 0,
+  },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
   inputIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#F5F5F7',
     borderWidth: 0,
     alignItems: 'center',
@@ -1810,33 +2090,70 @@ const styles = StyleSheet.create({
   },
   inputFieldWrap: {
     flex: 1,
-    backgroundColor: '#F5F5F7',
-    borderRadius: 22,
-    paddingLeft: 14,
-    paddingRight: 36,
-    paddingVertical: 0,
+    backgroundColor: 'rgba(245,245,247,0.8)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+    paddingLeft: 16,
+    paddingRight: 44,
+    paddingVertical: 4,
+    minHeight: 52,
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
   inputText: {
     marginHorizontal: 0,
     backgroundColor: 'transparent',
     borderWidth: 0,
-    borderRadius: 22,
-    paddingVertical: 9,
+    borderRadius: 24,
+    paddingVertical: 11,
     paddingHorizontal: 0,
     color: '#19191C',
-    fontSize: 14,
+    fontSize: 15,
   },
   inputInnerMic: {
     position: 'absolute',
-    right: 10,
-    bottom: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    right: 12,
+    bottom: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  inputInnerMicActive: {
+    position: 'absolute',
+    right: 12,
+    bottom: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FF318C',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FF318C',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  recordingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingRight: 32,
+    gap: 8,
+  },
+  recordingDotWrap: { width: 10, height: 10, alignItems: 'center', justifyContent: 'center' },
+  recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3B30' },
+  waveformContainer: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 28 },
+  waveBar: { width: 3, borderRadius: 1.5 },
+  recordingTranscript: { flex: 1, fontSize: 15, color: '#19191C', fontWeight: '400' },
+  recordingCursor: { color: '#FF318C', fontWeight: '300', fontSize: 15 },
   sendBtn: {
     width: 36,
     height: 36,
