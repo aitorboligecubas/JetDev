@@ -17,7 +17,7 @@ import {
   ChevronRight, History, Layers,
   CircleCheck, Sparkles, X,
   Trash2, Lock, Mail, BellOff, Bell, FileCode,
-  FolderOpen, Server, Code2, ExternalLink,
+  Folder, FolderOpen, Server, Code2, ExternalLink,
   Plus, Mic, ArrowUp
 } from 'lucide-react-native';
 
@@ -37,21 +37,110 @@ const previewNextSteps = [
   { label: 'Add validation' },
 ];
 
-const previewLogs = [
-  { time: '0.1s', message: 'Parsing prompt with Junie AI...', type: 'info' },
-  { time: '0.8s', message: 'Detected stack: Node.js + Express + PostgreSQL', type: 'info' },
-  { time: '2.5s', message: 'Writing route handlers (4 endpoints)...', type: 'info' },
-  { time: '4.1s', message: 'Generating DB schema (3 tables)...', type: 'info' },
-  { time: '8.4s', message: 'Running health check... 200 OK (12ms)', type: 'success' },
+// Fallback rows used only when the task has no events/files yet (very rare —
+// the modal is shown after deploy, when the backend has populated both).
+const previewLogsFallback = [
+  { time: '0.0s', message: 'Waiting for backend logs…', type: 'info' },
 ];
 
-const previewFiles = [
-  { path: 'src/index.js', status: 'created' },
-  { path: 'src/routes/bookings.js', status: 'created' },
-  { path: 'src/routes/users.js', status: 'created' },
-  { path: 'prisma/schema.prisma', status: 'modified' },
-  { path: 'package.json', status: 'modified' },
+const previewFilesFallback = [
+  { type: 'file', path: 'README.md', name: 'README.md', status: 'created', depth: 0 },
 ];
+
+/** ─── Logs helpers ──────────────────────────────────────────────────────── */
+
+function formatElapsed(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '0.0s';
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const min = Math.floor(totalSeconds / 60);
+  const sec = totalSeconds % 60;
+  return `${min}m${String(sec).padStart(2, '0')}s`;
+}
+
+function deriveLogsFromTask(task) {
+  if (!task) return previewLogsFallback;
+  if (Array.isArray(task.events) && task.events.length > 0) {
+    return task.events.map((e) => ({
+      time: formatElapsed(e.elapsedMs),
+      message: e.message,
+      type: e.level || 'info',
+    }));
+  }
+  if (Array.isArray(task.logs) && task.logs.length > 0) {
+    return task.logs.map((line) => ({
+      time: '',
+      message: line,
+      type: typeof line === 'string' && line.toLowerCase().startsWith('error') ? 'error' : 'info',
+    }));
+  }
+  return previewLogsFallback;
+}
+
+/** ─── Files tree helpers ───────────────────────────────────────────────── */
+
+/**
+ * Converts a flat list of `{ path, status }` into a flattened, alphabetically
+ * sorted tree where directories come before files at the same depth. Each item
+ * has a `depth` for indentation rendering.
+ */
+function buildFileTreeRows(files) {
+  if (!Array.isArray(files) || files.length === 0) return previewFilesFallback;
+
+  // Build nested tree: root.children = Map<name, node>.
+  const root = { type: 'dir', name: '', children: new Map() };
+  for (const entry of files) {
+    if (!entry || typeof entry.path !== 'string' || entry.path.length === 0) continue;
+    const segments = entry.path.split('/').filter(Boolean);
+    if (segments.length === 0) continue;
+    let cursor = root;
+    for (let i = 0; i < segments.length; i += 1) {
+      const seg = segments[i];
+      const isLast = i === segments.length - 1;
+      if (isLast) {
+        cursor.children.set(seg, {
+          type: 'file',
+          name: seg,
+          path: entry.path,
+          status: entry.status === 'modified' ? 'modified' : 'created',
+        });
+      } else {
+        let child = cursor.children.get(seg);
+        if (!child || child.type !== 'dir') {
+          child = { type: 'dir', name: seg, children: new Map() };
+          cursor.children.set(seg, child);
+        }
+        cursor = child;
+      }
+    }
+  }
+
+  // Walk in DFS order, dirs before files, alphabetical.
+  const out = [];
+  function walk(node, depth) {
+    const entries = Array.from(node.children.values()).sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const child of entries) {
+      if (child.type === 'dir') {
+        out.push({ type: 'dir', name: child.name, depth });
+        walk(child, depth + 1);
+      } else {
+        out.push({
+          type: 'file',
+          name: child.name,
+          path: child.path,
+          status: child.status,
+          depth,
+        });
+      }
+    }
+  }
+  walk(root, 0);
+  return out;
+}
 
 const deployedUrl = 'https://restaurant-api.jetdev.app';
 
@@ -209,6 +298,8 @@ const SearchingDots = () => {
   );
 };
 
+const ROTATING_PHRASES = ['Thinking', 'Building', 'Debugging', 'Refining', 'Wiring', 'Polishing'];
+
 const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
   const entryOpacity = useRef(new RNAnimated.Value(0)).current;
   const entryX = useRef(new RNAnimated.Value(18)).current;
@@ -216,6 +307,12 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
   const labelOpacity = useRef(new RNAnimated.Value(1)).current;
   const searchingOpacity = useRef(new RNAnimated.Value(1)).current;
   const valueOpacity = useRef(new RNAnimated.Value(0)).current;
+
+  // Rotating phrase shown next to the dots while still "searching".
+  const [phraseIdx, setPhraseIdx] = useState(() =>
+    Math.floor(Math.random() * ROTATING_PHRASES.length),
+  );
+  const phraseOpacity = useRef(new RNAnimated.Value(1)).current;
 
   useEffect(() => {
     RNAnimated.parallel([
@@ -236,6 +333,17 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
       labelOpacity.setValue(1);
     }
   }, [status, labelOpacity, searchingOpacity, valueOpacity]);
+
+  useEffect(() => {
+    if (status === 'done') return undefined;
+    const interval = setInterval(() => {
+      RNAnimated.timing(phraseOpacity, { toValue: 0, duration: 180, useNativeDriver: true }).start(() => {
+        setPhraseIdx((prev) => (prev + 1) % ROTATING_PHRASES.length);
+        RNAnimated.timing(phraseOpacity, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+      });
+    }, 1600);
+    return () => clearInterval(interval);
+  }, [status, phraseOpacity]);
 
   const isNeutralValue = doneValue === 'Node.js';
   const isSuccessValue = !isNeutralValue;
@@ -274,7 +382,9 @@ const ActivityRow = ({ label, status, doneValue, doneColor = '#FFFFFF' }) => {
             </RNAnimated.View>
           ) : isSearching ? (
             <RNAnimated.View style={[styles.activitySearchingWrap, { opacity: searchingOpacity }]}>
-              <Text style={styles.activitySearchingText}>Searching</Text>
+              <RNAnimated.Text style={[styles.activitySearchingText, { opacity: phraseOpacity }]}>
+                {ROTATING_PHRASES[phraseIdx]}
+              </RNAnimated.Text>
               <SearchingDots />
             </RNAnimated.View>
           ) : null}
@@ -355,9 +465,10 @@ const JunieMessage = ({ text, thinkingMs = 1200 }) => {
   );
 };
 
-const UserMessage = ({ text }) => {
+const UserMessage = ({ text, queued = false }) => {
   const opacity = useRef(new RNAnimated.Value(0)).current;
   const y = useRef(new RNAnimated.Value(10)).current;
+  const queuedOpacity = useRef(new RNAnimated.Value(queued ? 1 : 0)).current;
 
   useEffect(() => {
     RNAnimated.parallel([
@@ -366,13 +477,29 @@ const UserMessage = ({ text }) => {
     ]).start();
   }, [opacity, y]);
 
+  useEffect(() => {
+    RNAnimated.timing(queuedOpacity, {
+      toValue: queued ? 1 : 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [queued, queuedOpacity]);
+
   return (
-    <RNAnimated.View style={[styles.userBubbleOuter, { opacity, transform: [{ translateY: y }] }]}>
-      <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.userBubbleGradFill} />
-      <View style={styles.userBubbleInner}>
-        <Text style={styles.userText}>{text}</Text>
-      </View>
-    </RNAnimated.View>
+    <View style={{ alignItems: 'flex-end' }}>
+      <RNAnimated.View style={[styles.userBubbleOuter, { opacity, transform: [{ translateY: y }] }]}>
+        <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.userBubbleGradFill} />
+        <View style={styles.userBubbleInner}>
+          <Text style={styles.userText}>{text}</Text>
+        </View>
+      </RNAnimated.View>
+      {queued ? (
+        <RNAnimated.View style={[styles.queuedPill, { opacity: queuedOpacity }]}>
+          <Clock size={9} color="#FF318C" strokeWidth={2.4} />
+          <Text style={styles.queuedPillText}>Queued · runs after deploy</Text>
+        </RNAnimated.View>
+      ) : null}
+    </View>
   );
 };
 
@@ -538,6 +665,83 @@ export default function JetDevScreen() {
   const seenLogsRef = useRef(new Set());
   const seenStatusesRef = useRef(new Set());
 
+  // Bottom-input messages typed while the project is still generating get
+  // staged here. When the deploy finishes we replay them as fake Junie chat
+  // (mock — there is no backend round-trip) and only then advance the UI to
+  // the tabs view, so the queued items appear to start executing.
+  const genQueueRef = useRef([]);
+  const queueProcessingRef = useRef(false);
+  const hasAutoOpenedRef = useRef(false);
+
+  // Iteration chat (post-deploy refinements). Faked for the demo: messages
+  // appear instantly, Junie replies with a canned response. No backend call.
+  const [iterateOpen, setIterateOpen] = useState(false);
+  const [iterateInput, setIterateInput] = useState('');
+  const [iterateFeed, setIterateFeed] = useState([]);
+  const iterateScrollRef = useRef(null);
+  const iterateSendBg = useRef(new RNAnimated.Value(0)).current;
+  const iterateSendScale = useRef(new RNAnimated.Value(1)).current;
+  const makeIterateId = useStableId('iter');
+
+  const ITERATE_FAKE_REPLIES = [
+    'Got it. I will rework that change in the next pass and keep the existing styles consistent.',
+    'Makes sense. I will tweak the layout and update the affected components accordingly.',
+    'Understood. I will adjust that section without touching the rest of the build.',
+    'Noted. I will refine that detail and re-run the preview when the change is ready.',
+  ];
+
+  const openIterateChat = () => {
+    if (iterateFeed.length === 0) {
+      setIterateFeed([
+        {
+          id: makeIterateId(),
+          kind: 'junie',
+          thinkingMs: 600,
+          text: `${task?.name || 'Your project'} is live. What would you like to refine?`,
+        },
+      ]);
+    }
+    setIterateOpen(true);
+  };
+
+  const handleIterateSend = () => {
+    const text = iterateInput.trim();
+    if (!text) return;
+    setIterateInput('');
+    const userId = makeIterateId();
+    const replyId = makeIterateId();
+    setIterateFeed(prev => [...prev, { id: userId, kind: 'user', text }]);
+    setTimeout(() => {
+      const reply = ITERATE_FAKE_REPLIES[Math.floor(Math.random() * ITERATE_FAKE_REPLIES.length)];
+      setIterateFeed(prev => [...prev, { id: replyId, kind: 'junie', thinkingMs: 800, text: reply }]);
+    }, 250);
+  };
+
+  const hasIterateText = iterateInput.trim().length > 0;
+
+  useEffect(() => {
+    RNAnimated.timing(iterateSendBg, {
+      toValue: hasIterateText ? 1 : 0,
+      duration: 200,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    }).start();
+    if (hasIterateText) {
+      iterateSendScale.setValue(0.82);
+      RNAnimated.spring(iterateSendScale, { toValue: 1, speed: 22, bounciness: 0, useNativeDriver: true }).start();
+    } else {
+      iterateSendScale.setValue(1);
+    }
+  }, [hasIterateText, iterateSendBg, iterateSendScale]);
+
+  useEffect(() => {
+    if (!iterateOpen) return;
+    const t = setTimeout(() => {
+      iterateScrollRef.current?.scrollToEnd({ animated: true });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [iterateFeed.length, iterateOpen]);
+
   const genScrollRef = useRef(null);
   const genProgress = useRef(new RNAnimated.Value(0)).current;
   const genTimers = useRef([]);
@@ -648,7 +852,9 @@ export default function JetDevScreen() {
     const text = genInput.trim();
     if (!text) return;
     setGenInput('');
-    setGenFeed(prev => [...prev, { id: makeId(), kind: 'user', text }]);
+    const userId = makeId();
+    setGenFeed(prev => [...prev, { id: userId, kind: 'user', text, queued: true }]);
+    genQueueRef.current.push({ userMsgId: userId, text });
   };
 
   const hasSendText = genInput.trim().length > 0;
@@ -687,11 +893,54 @@ export default function JetDevScreen() {
     pushing: 'Pushing to GitHub',
   };
 
+  const finalizeDeployUi = () => {
+    setCurrentStep(3);
+    genProgress.stopAnimation();
+    RNAnimated.timing(genProgress, { toValue: 1, duration: 600, useNativeDriver: false }).start();
+  };
+
+  const processGenQueue = () => {
+    if (queueProcessingRef.current) return;
+    if (genQueueRef.current.length === 0) {
+      finalizeDeployUi();
+      return;
+    }
+    queueProcessingRef.current = true;
+
+    const tick = () => {
+      const next = genQueueRef.current.shift();
+      if (!next) {
+        queueProcessingRef.current = false;
+        finalizeDeployUi();
+        return;
+      }
+      // Drop the "queued" badge from the staged user bubble.
+      setGenFeed(prev => prev.map(item =>
+        item.id === next.userMsgId ? { ...item, queued: false } : item
+      ));
+      // Append a Junie thinking → reply bubble with a canned response.
+      const replyId = makeId();
+      const reply = ITERATE_FAKE_REPLIES[Math.floor(Math.random() * ITERATE_FAKE_REPLIES.length)];
+      setGenFeed(prev => [...prev, { id: replyId, kind: 'junie', text: reply, thinkingMs: 1100 }]);
+      const t = setTimeout(tick, 1900);
+      genTimers.current.push(t);
+    };
+
+    tick();
+  };
+
   const ingestTaskUpdate = (incoming) => {
     setTask(incoming);
 
-    if (typeof STATUS_TO_STEP[incoming.status] === 'number') {
-      setCurrentStep(STATUS_TO_STEP[incoming.status]);
+    const targetStep = STATUS_TO_STEP[incoming.status];
+    if (typeof targetStep === 'number') {
+      // Hold at "deploying" while we replay queued chat messages — we'll bump
+      // to step 3 once the queue drains.
+      if (incoming.status === 'deployed' && genQueueRef.current.length > 0) {
+        setCurrentStep(2);
+      } else {
+        setCurrentStep(targetStep);
+      }
     }
 
     if (Array.isArray(incoming.logs)) {
@@ -724,9 +973,18 @@ export default function JetDevScreen() {
     }
 
     if (incoming.status === 'deployed') {
-      setCurrentStep(3);
-      genProgress.stopAnimation();
-      RNAnimated.timing(genProgress, { toValue: 1, duration: 600, useNativeDriver: false }).start();
+      // Auto-open the deployed app in the browser exactly once. The user wants
+      // to see the deploy first; queued chat messages execute as a secondary
+      // animation.
+      if (!hasAutoOpenedRef.current && incoming.previewUrl) {
+        hasAutoOpenedRef.current = true;
+        Linking.openURL(incoming.previewUrl).catch(() => {});
+      }
+      if (genQueueRef.current.length > 0) {
+        processGenQueue();
+      } else {
+        finalizeDeployUi();
+      }
     }
     if (incoming.status === 'error') {
       setTaskError(incoming.error || 'Pipeline failed');
@@ -747,6 +1005,9 @@ export default function JetDevScreen() {
     setTaskError('');
     seenLogsRef.current = new Set();
     seenStatusesRef.current = new Set();
+    genQueueRef.current = [];
+    queueProcessingRef.current = false;
+    hasAutoOpenedRef.current = false;
     if (cancelPollRef.current) {
       cancelPollRef.current();
       cancelPollRef.current = null;
@@ -775,13 +1036,42 @@ export default function JetDevScreen() {
   };
 
   const handleAccept = async () => {
-    if (!task?.id || accepting) return;
+    if (!task?.id || accepting || task?.status === 'pushing') return;
     setAccepting(true);
+
+    // Optimistic flip so the button reacts before the network roundtrip.
+    setTask(prev => (prev ? { ...prev, status: 'pushing', error: null } : prev));
+
     try {
-      const accepted = await acceptTask(task.id);
-      setTask(accepted);
-      setIsExpanded(false);
-      setTimeout(() => setState('success'), 250);
+      const initial = await acceptTask(task.id);
+      setTask(initial);
+
+      // Backend now returns immediately with status='pushing' and runs git in
+      // the background. Resume polling until 'accepted' or 'error'.
+      if (cancelPollRef.current) {
+        cancelPollRef.current();
+        cancelPollRef.current = null;
+      }
+      cancelPollRef.current = pollTask(task.id, {
+        onUpdate: (incoming) => {
+          setTask(incoming);
+          if (incoming.status === 'accepted') {
+            setIsExpanded(false);
+            setTimeout(() => setState('success'), 250);
+          } else if (incoming.status === 'error') {
+            setTaskError(incoming.error || 'Failed to push to GitHub');
+            setIsExpanded(false);
+            setTimeout(() => setState('error'), 300);
+          }
+        },
+        onError: (err) => {
+          setTaskError(err.message);
+          setIsExpanded(false);
+          setTimeout(() => setState('error'), 300);
+        },
+        intervalMs: 500,
+        timeoutMs: 2 * 60 * 1000,
+      });
     } catch (err) {
       setTaskError(err?.message || 'Failed to push to GitHub');
       setIsExpanded(false);
@@ -790,6 +1080,8 @@ export default function JetDevScreen() {
       setAccepting(false);
     }
   };
+
+  const isPushing = accepting || task?.status === 'pushing';
 
   const handleDiscard = () => {
     if (cancelPollRef.current) {
@@ -803,6 +1095,11 @@ export default function JetDevScreen() {
       setPrompt('');
       setTask(null);
       setTaskError('');
+      setIterateFeed([]);
+      setIterateInput('');
+      genQueueRef.current = [];
+      queueProcessingRef.current = false;
+      hasAutoOpenedRef.current = false;
     }, 300);
   };
 
@@ -815,6 +1112,11 @@ export default function JetDevScreen() {
     setPrompt('');
     setTask(null);
     setTaskError('');
+    setIterateFeed([]);
+    setIterateInput('');
+    genQueueRef.current = [];
+    queueProcessingRef.current = false;
+    hasAutoOpenedRef.current = false;
   };
 
   useEffect(() => {
@@ -918,10 +1220,16 @@ export default function JetDevScreen() {
             <TouchableOpacity onPress={handleDiscard} style={styles.genCloseBtn}>
               <X size={16} color="#19191C" />
             </TouchableOpacity>
-            <Text style={styles.genProjectName}>Restaurant Booking API</Text>
-            <View style={styles.genStackTag}>
-              <Text style={styles.genStackTagText}>Node.js</Text>
-            </View>
+            <Text style={styles.genProjectName} numberOfLines={1}>
+              {task?.name || 'Generating project…'}
+            </Text>
+            {currentStep === 3 ? (
+              <View style={styles.genStackTag}>
+                <Text style={styles.genStackTagText}>{task?.stack || 'React + Vite'}</Text>
+              </View>
+            ) : (
+              <View style={styles.genStackTagPlaceholder} />
+            )}
           </View>
 
           <View style={styles.genStepper}>
@@ -982,11 +1290,11 @@ export default function JetDevScreen() {
                       ]}
                     />
                   </View>
-                  <Text style={styles.genLiveText}>Live on AWS</Text>
+                  <Text style={styles.genLiveText}>Live preview</Text>
                 </View>
 
                 <View style={styles.genStatusStackPill}>
-                  <Text style={styles.genStatusStackText}>Node.js + Express</Text>
+                  <Text style={styles.genStatusStackText}>{task?.stack || 'React + Vite'}</Text>
                 </View>
               </View>
 
@@ -1061,74 +1369,153 @@ export default function JetDevScreen() {
                     </View>
                   </>
                 ) : genModalTab === 'Logs' ? (
-                  <View style={styles.logsCard}>
-                    {previewLogs.map((log, i) => (
-                      <View key={i} style={styles.logRow}>
-                        <Text style={styles.logTime}>{log.time}</Text>
-                        <Text
-                          style={[
-                            styles.logMsg,
-                            log.type === 'error'
-                              ? { color: '#FF6B6B' }
-                              : log.type === 'success'
-                              ? { color: '#4ADE80' }
-                              : null,
-                          ]}
-                        >
-                          {log.message}
-                        </Text>
+                  (() => {
+                    const logRows = deriveLogsFromTask(task);
+                    const createdCount = (task?.files || []).filter((f) => f?.status === 'created').length;
+                    const modifiedCount = (task?.files || []).filter((f) => f?.status === 'modified').length;
+                    const totalElapsed = task?.events?.length
+                      ? formatElapsed(task.events[task.events.length - 1].elapsedMs)
+                      : null;
+                    return (
+                      <View style={styles.logsCard}>
+                        <View style={styles.logsHeaderRow}>
+                          <Text style={styles.logsHeaderTitle}>Pipeline timeline</Text>
+                          {totalElapsed ? (
+                            <Text style={styles.logsHeaderMeta}>{totalElapsed}</Text>
+                          ) : null}
+                        </View>
+                        {logRows.map((log, i) => (
+                          <View key={i} style={styles.logRow}>
+                            <Text style={styles.logTime}>{log.time}</Text>
+                            <View
+                              style={[
+                                styles.logBullet,
+                                log.type === 'error'
+                                  ? { backgroundColor: '#FF6B6B' }
+                                  : log.type === 'success'
+                                  ? { backgroundColor: '#4ADE80' }
+                                  : { backgroundColor: 'rgba(255,255,255,0.35)' },
+                              ]}
+                            />
+                            <Text
+                              style={[
+                                styles.logMsg,
+                                log.type === 'error'
+                                  ? { color: '#FF6B6B' }
+                                  : log.type === 'success'
+                                  ? { color: '#4ADE80' }
+                                  : null,
+                              ]}
+                            >
+                              {log.message}
+                            </Text>
+                          </View>
+                        ))}
+                        {modifiedCount + createdCount > 0 ? (
+                          <View style={styles.logsFooter}>
+                            <Text style={styles.logsFooterText}>
+                              {`${createdCount} created · ${modifiedCount} modified`}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
-                    ))}
-                  </View>
+                    );
+                  })()
                 ) : (
-                  <View style={{ paddingTop: 6 }}>
-                    {previewFiles.map((file, i) => (
-                      <View key={i} style={styles.fileRow}>
-                        <View style={styles.fileLeft}>
-                          <FileCode size={14} color="#ABABAB" />
-                          <Text style={styles.filePath} numberOfLines={1}>
-                            {file.path}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.fileBadge,
-                            file.status === 'created'
-                              ? { backgroundColor: 'rgba(123,82,255,0.10)' }
-                              : file.status === 'modified'
-                              ? { backgroundColor: 'rgba(255,49,140,0.08)' }
-                              : { backgroundColor: 'rgba(0,0,0,0.05)' },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.fileBadgeText,
-                              file.status === 'created'
-                                ? { color: '#7B52FF' }
-                                : file.status === 'modified'
-                                ? { color: '#FF318C' }
-                                : { color: '#ABABAB' },
-                            ]}
-                          >
-                            {file.status}
-                          </Text>
-                        </View>
+                  (() => {
+                    const treeRows = buildFileTreeRows(task?.files);
+                    return (
+                      <View style={{ paddingTop: 6 }}>
+                        {treeRows.map((row, i) => {
+                          if (row.type === 'dir') {
+                            return (
+                              <View
+                                key={`dir-${i}-${row.name}`}
+                                style={[styles.fileRow, styles.dirRow, { paddingLeft: 20 + row.depth * 16 }]}
+                              >
+                                <View style={styles.fileLeft}>
+                                  <FolderOpen size={14} color="#7B52FF" strokeWidth={2.2} />
+                                  <Text style={styles.dirName} numberOfLines={1}>
+                                    {row.name}
+                                  </Text>
+                                </View>
+                              </View>
+                            );
+                          }
+                          return (
+                            <View
+                              key={`file-${i}-${row.path}`}
+                              style={[styles.fileRow, { paddingLeft: 20 + row.depth * 16 }]}
+                            >
+                              <View style={styles.fileLeft}>
+                                <FileCode size={14} color="#ABABAB" />
+                                <Text style={styles.filePath} numberOfLines={1}>
+                                  {row.name}
+                                </Text>
+                              </View>
+                              <View
+                                style={[
+                                  styles.fileBadge,
+                                  row.status === 'created'
+                                    ? { backgroundColor: 'rgba(123,82,255,0.10)' }
+                                    : row.status === 'modified'
+                                    ? { backgroundColor: 'rgba(255,49,140,0.08)' }
+                                    : { backgroundColor: 'rgba(0,0,0,0.05)' },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.fileBadgeText,
+                                    row.status === 'created'
+                                      ? { color: '#7B52FF' }
+                                      : row.status === 'modified'
+                                      ? { color: '#FF318C' }
+                                      : { color: '#ABABAB' },
+                                  ]}
+                                >
+                                  {row.status}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
                       </View>
-                    ))}
-                  </View>
+                    );
+                  })()
                 )}
               </ScrollView>
 
               {/* BOTTOM ACTION BAR */}
               <View style={[styles.previewActionBar, { paddingBottom: insets.bottom + 28 }]}>
-                <TouchableOpacity style={styles.previewPrimaryBtn} activeOpacity={0.92} onPress={handleAccept}>
+                <TouchableOpacity
+                  style={[styles.previewPrimaryBtn, isPushing && { opacity: 0.85 }]}
+                  activeOpacity={0.92}
+                  onPress={handleAccept}
+                  disabled={isPushing}
+                >
                   <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.previewPrimaryGrad}>
-                    <GitBranch size={16} color="#FFFFFF" strokeWidth={2.2} />
-                    <Text style={styles.previewPrimaryText}>Accept & Commit to Git</Text>
+                    {isPushing ? (
+                      <>
+                        <SearchingDots />
+                        <Text style={styles.previewPrimaryText}>Pushing to GitHub…</Text>
+                      </>
+                    ) : (
+                      <>
+                        <GitBranch size={16} color="#FFFFFF" strokeWidth={2.2} />
+                        <Text style={styles.previewPrimaryText}>Accept & Commit to Git</Text>
+                      </>
+                    )}
                   </LinearGradient>
                 </TouchableOpacity>
-                <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 4 }} activeOpacity={0.7} onPress={handleDiscard}>
-                  <Text style={styles.previewDiscardText}>Discard environment</Text>
+                <TouchableOpacity
+                  style={{ alignItems: 'center', paddingVertical: 4 }}
+                  activeOpacity={0.7}
+                  onPress={handleDiscard}
+                  disabled={isPushing}
+                >
+                  <Text style={[styles.previewDiscardText, isPushing && { opacity: 0.4 }]}>
+                    Discard environment
+                  </Text>
                 </TouchableOpacity>
               </View>
             </>
@@ -1206,7 +1593,7 @@ export default function JetDevScreen() {
                     return (
                       <View key={item.id}>
                         {shouldInsertDivider ? <View style={styles.feedSectionDivider} /> : null}
-                        <UserMessage text={item.text} />
+                        <UserMessage text={item.text} queued={item.queued} />
                       </View>
                     );
                   }
@@ -1281,9 +1668,9 @@ export default function JetDevScreen() {
             <View style={styles.previewHeaderCard}>
               <View style={styles.liveRow}>
                 <View style={styles.liveDot} />
-                <Text style={styles.liveText}>● Live on AWS</Text>
+                <Text style={styles.liveText}>● Live preview</Text>
               </View>
-              <Text style={styles.stackText}>Node.js + Express</Text>
+              <Text style={styles.stackText}>{task?.stack || 'React + Vite'}</Text>
             </View>
             <View style={styles.pseudoTabs}>
               {['Preview', 'Logs', 'Files'].map(tab => (
@@ -1315,8 +1702,34 @@ export default function JetDevScreen() {
             <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Connect database</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
             <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Add validation</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
             <View style={styles.actionColumn}>
-              <TouchableOpacity onPress={handleAccept} style={styles.primaryBtn} activeOpacity={0.8}><GitBranch size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} /><Text style={styles.primaryBtnText}>Accept & Commit to Git</Text></TouchableOpacity>
-              <TouchableOpacity onPress={() => setState('empty')} style={styles.destructiveLink} activeOpacity={0.6}><Text style={styles.destructiveLinkText}>Discard environment</Text></TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleAccept}
+                style={[styles.primaryBtn, isPushing && { opacity: 0.85 }]}
+                activeOpacity={0.8}
+                disabled={isPushing}
+              >
+                {isPushing ? (
+                  <>
+                    <SearchingDots />
+                    <Text style={styles.primaryBtnText}>Pushing to GitHub…</Text>
+                  </>
+                ) : (
+                  <>
+                    <GitBranch size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} />
+                    <Text style={styles.primaryBtnText}>Accept & Commit to Git</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setState('empty')}
+                style={styles.destructiveLink}
+                activeOpacity={0.6}
+                disabled={isPushing}
+              >
+                <Text style={[styles.destructiveLinkText, isPushing && { opacity: 0.4 }]}>
+                  Discard environment
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -1348,9 +1761,9 @@ export default function JetDevScreen() {
               <View style={styles.infoCell}><Text style={styles.infoLabel}>STATUS</Text><Text style={styles.infoValue}>{task?.status || '—'}</Text></View>
             </View>
             <TouchableOpacity
-              onPress={() => task?.branchUrl && Linking.openURL(task.branchUrl)}
-              disabled={!task?.branchUrl}
-              style={[styles.primaryBtn, { width: '100%', marginBottom: 8, opacity: task?.branchUrl ? 1 : 0.5 }]}
+              onPress={() => task?.previewUrl && Linking.openURL(task.previewUrl)}
+              disabled={!task?.previewUrl}
+              style={[styles.primaryBtn, { width: '100%', marginBottom: 8, opacity: task?.previewUrl ? 1 : 0.5 }]}
               activeOpacity={0.8}
             >
               <Text style={styles.primaryBtnText}>Open in Browser</Text>
@@ -1362,6 +1775,12 @@ export default function JetDevScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.primaryBtnText}>Open in IntelliJ</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={openIterateChat} style={[styles.iterateBtn, { width: '100%' }]} activeOpacity={0.92}>
+              <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.iterateBtnGrad}>
+                <Sparkles size={15} color="#FFFFFF" strokeWidth={2.2} />
+                <Text style={styles.iterateBtnText}>Continue iterating with Junie</Text>
+              </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity onPress={reset} style={styles.flatLink}><Text style={styles.flatLinkText}>Build something new</Text></TouchableOpacity>
           </View>
@@ -1385,6 +1804,95 @@ export default function JetDevScreen() {
           </View>
         </View>
       )}
+
+      {/* Iterate Chat Modal — fake post-deploy refinement chat */}
+      <SlideUpModal visible={iterateOpen}>
+        <JetDevHeroGradient isFullscreen={true}>
+          <View pointerEvents="none" style={styles.genWhiteBase} />
+          <LinearGradient
+            pointerEvents="none"
+            colors={['rgba(255,49,140,0.04)', 'rgba(123,82,255,0.06)', 'rgba(255,255,255,0)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.genTintOverlay}
+          />
+
+          <View style={[styles.genHeader, { paddingTop: insets.top + 16 }]}>
+            <TouchableOpacity onPress={() => setIterateOpen(false)} style={styles.genCloseBtn}>
+              <X size={16} color="#19191C" />
+            </TouchableOpacity>
+            <Text style={styles.genProjectName} numberOfLines={1}>
+              {task?.name || 'Iterate'}
+            </Text>
+            <View style={styles.genStackTag}>
+              <Text style={styles.genStackTagText}>{task?.stack || 'React + Vite'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.iterateSubheader}>
+            <Sparkles size={12} color="#7B52FF" />
+            <Text style={styles.iterateSubheaderText}>Refine the deployed preview with Junie</Text>
+          </View>
+
+          <ScrollView
+            ref={iterateScrollRef}
+            style={styles.genFeed}
+            contentContainerStyle={[styles.genFeedContent, { paddingBottom: insets.bottom + 8 + 88 }]}
+            showsVerticalScrollIndicator={false}
+          >
+            {iterateFeed.map((item) => {
+              if (item.kind === 'junie') {
+                return <JunieMessage key={item.id} text={item.text} thinkingMs={item.thinkingMs ?? 800} />;
+              }
+              if (item.kind === 'user') {
+                return <UserMessage key={item.id} text={item.text} />;
+              }
+              return null;
+            })}
+          </ScrollView>
+
+          <View style={[styles.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.inputRow}>
+              <TouchableOpacity style={styles.inputIconBtn} activeOpacity={0.85}>
+                <Plus size={18} color="rgba(25,25,28,0.55)" />
+              </TouchableOpacity>
+
+              <TextInput
+                value={iterateInput}
+                onChangeText={setIterateInput}
+                placeholder="Ask Junie to refine something..."
+                placeholderTextColor="rgba(25,25,28,0.35)"
+                style={styles.inputText}
+                multiline
+                maxHeight={80}
+              />
+
+              <RNAnimated.View
+                style={[
+                  styles.sendBtn,
+                  { transform: [{ scale: iterateSendScale }] },
+                ]}
+              >
+                <View pointerEvents="none" style={styles.sendBtnBaseBg} />
+                <RNAnimated.View pointerEvents="none" style={[styles.sendBtnGradWrap, { opacity: iterateSendBg }]}>
+                  <LinearGradient colors={['#FF318C', '#7B52FF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.sendBtnGrad} />
+                </RNAnimated.View>
+                <TouchableOpacity
+                  style={styles.sendBtnPressable}
+                  activeOpacity={0.85}
+                  onPress={hasIterateText ? handleIterateSend : undefined}
+                >
+                  {hasIterateText ? (
+                    <ArrowUp size={18} color="#FFFFFF" />
+                  ) : (
+                    <Mic size={18} color="rgba(25,25,28,0.45)" />
+                  )}
+                </TouchableOpacity>
+              </RNAnimated.View>
+            </View>
+          </View>
+        </JetDevHeroGradient>
+      </SlideUpModal>
 
       {/* My Projects Modal */}
       <Modal visible={showHistory} animationType="slide" transparent={true}>
@@ -1424,6 +1932,11 @@ const styles = StyleSheet.create({
   
   primaryBtn: { backgroundColor: JB.blue, borderRadius: 8, height: 40, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   primaryBtnText: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  iterateBtn: { borderRadius: 8, height: 40, marginBottom: 8, overflow: 'hidden' },
+  iterateBtnGrad: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  iterateBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  iterateSubheader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 12 },
+  iterateSubheaderText: { color: '#6B6B6B', fontSize: 12, fontWeight: '500' },
   flatLink: { height: 40, alignItems: 'center', justifyContent: 'center' },
   flatLinkText: { color: JB.blue, fontSize: 14, fontWeight: '600' },
   destructiveLink: { height: 40, alignItems: 'center', justifyContent: 'center' },
@@ -1468,6 +1981,7 @@ const styles = StyleSheet.create({
   genProjectName: { color: '#19191C', fontSize: 16, fontWeight: '700', letterSpacing: -0.3 },
   genStackTag: { backgroundColor: '#F5F5F7', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
   genStackTagText: { color: '#8A8A8A', fontSize: 12, fontWeight: '500' },
+  genStackTagPlaceholder: { width: 28, height: 24 },
 
   genWhiteBase: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFFFFF' },
   genTintOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
@@ -1535,15 +2049,23 @@ const styles = StyleSheet.create({
   nextStepLabel: { flex: 1, fontSize: 14, fontWeight: '400', color: '#19191C', letterSpacing: -0.1 },
 
   logsCard: { margin: 16, backgroundColor: '#141417', borderRadius: 14, padding: 14, minHeight: 200 },
-  logRow: { flexDirection: 'row', gap: 10, marginBottom: 3 },
-  logTime: { fontSize: 11, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.25)', width: 52 },
-  logMsg: { flex: 1, fontSize: 11, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.65)', lineHeight: 17 },
+  logsHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  logsHeaderTitle: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.85)', letterSpacing: 1.2, textTransform: 'uppercase' },
+  logsHeaderMeta: { fontSize: 11, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.45)' },
+  logRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 5 },
+  logTime: { fontSize: 11, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.30)', width: 48 },
+  logBullet: { width: 6, height: 6, borderRadius: 3 },
+  logMsg: { flex: 1, fontSize: 11.5, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.78)', lineHeight: 17 },
+  logsFooter: { marginTop: 10, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.08)' },
+  logsFooterText: { fontSize: 10.5, fontFamily: MONO_FONT, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.3 },
 
-  fileRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#F0F0F0' },
+  fileRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#F0F0F0' },
   fileLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, paddingRight: 12 },
   filePath: { flex: 1, fontSize: 13, fontFamily: MONO_FONT, color: '#19191C', letterSpacing: -0.1 },
   fileBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5 },
   fileBadgeText: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
+  dirRow: { borderBottomColor: 'transparent' },
+  dirName: { flex: 1, fontSize: 13, fontWeight: '600', color: '#19191C', letterSpacing: -0.1 },
 
   previewActionBar: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#F0F0F0', backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingTop: 12, position: 'absolute', left: 0, right: 0, bottom: 0 },
   previewPrimaryBtn: { borderRadius: 16, overflow: 'hidden', marginBottom: 10 },
@@ -1642,6 +2164,28 @@ const styles = StyleSheet.create({
   userBubbleGradFill: { ...StyleSheet.absoluteFillObject, borderRadius: 21 },
   userBubbleInner: { backgroundColor: '#FFFFFF', borderRadius: 19.5, paddingHorizontal: 14, paddingVertical: 11 },
   userText: { fontSize: 14, lineHeight: 21, color: '#19191C', fontWeight: '400' },
+  queuedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-end',
+    marginRight: 22,
+    marginTop: 2,
+    marginBottom: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,49,140,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,49,140,0.18)',
+  },
+  queuedPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FF318C',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
 
   questionWrap: { width: '100%' },
   qBorderWrap: { marginHorizontal: 16, marginVertical: 8, padding: 1, borderRadius: 20, overflow: 'hidden' },

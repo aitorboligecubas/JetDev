@@ -6,7 +6,9 @@ import { logger } from '../utils/logger.js';
 /**
  * Contract that Toni's real implementation MUST respect.
  *
- *   generateProject({ prompt, taskId }) -> Promise<{ projectPath, previewUrl, files? }>
+ *   generateProject({ prompt, taskId }) -> Promise<{
+ *     projectPath, previewUrl, name?, stack?, files?
+ *   }>
  *
  *   - prompt:      string. The natural language input from the mobile app.
  *   - taskId:      string. Unique id created by the backend, used for naming the
@@ -16,7 +18,10 @@ import { logger } from '../utils/logger.js';
  *   - projectPath: absolute path on disk to the generated project. Arnau will
  *                  push this folder to GitHub.
  *   - previewUrl:  publicly accessible URL of the deployed preview.
- *   - files:       (optional) array of file paths that were created/modified.
+ *   - name, stack: short labels rendered on the preview UI.
+ *   - files:       (optional) array of `{ path: string, status: 'created'|'modified' }`
+ *                  describing the final project tree. The frontend converts the
+ *                  flat list into a folder tree.
  *
  *   On failure: throw new Error("descriptive message").
  *
@@ -59,10 +64,16 @@ async function mockGenerateProject({ prompt, taskId }) {
   return {
     projectPath: `/generated/${taskId}${githubFailureMarker}`,
     previewUrl: `https://preview.example.com/${taskId}`,
+    name: 'Mock Project',
+    stack: 'React + Vite',
     files: [
-      'index.html',
-      'styles/main.css',
-      'scripts/app.js',
+      { path: 'README.md', status: 'created' },
+      { path: 'index.html', status: 'created' },
+      { path: 'package.json', status: 'created' },
+      { path: 'vite.config.js', status: 'created' },
+      { path: 'src/App.css', status: 'modified' },
+      { path: 'src/App.jsx', status: 'modified' },
+      { path: 'src/main.jsx', status: 'created' },
     ],
   };
 }
@@ -114,12 +125,44 @@ async function realGenerateProject({ prompt, taskId }) {
   logger.info(
     `[generator:real] done for task ${taskId} -> ${result.previewUrl}`,
   );
-  return result;
+
+  return {
+    projectPath: result.projectPath,
+    previewUrl: result.previewUrl,
+    name: typeof result.name === 'string' ? result.name : null,
+    stack: typeof result.stack === 'string' ? result.stack : null,
+    files: normalizeFiles(result.files),
+  };
+}
+
+function normalizeFiles(rawFiles) {
+  if (!Array.isArray(rawFiles)) return undefined;
+  const out = [];
+  for (const entry of rawFiles) {
+    if (!entry) continue;
+    if (typeof entry === 'string') {
+      out.push({ path: entry, status: 'created' });
+      continue;
+    }
+    if (typeof entry === 'object' && typeof entry.path === 'string') {
+      out.push({
+        path: entry.path,
+        status: entry.status === 'modified' ? 'modified' : 'created',
+      });
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
  * @param {{ prompt: string, taskId: string }} input
- * @returns {Promise<{ projectPath: string, previewUrl: string, files?: string[] }>}
+ * @returns {Promise<{
+ *   projectPath: string,
+ *   previewUrl: string,
+ *   name?: string|null,
+ *   stack?: string|null,
+ *   files?: Array<{ path: string, status: 'created'|'modified' }>
+ * }>}
  */
 export async function generateProject(input) {
   if (USE_MOCK) {

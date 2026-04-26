@@ -38,7 +38,7 @@ export async function runPipeline(taskId) {
   try {
     updateTask(taskId, { status: TASK_STATES.GENERATING });
     addLog(taskId, 'Understanding request');
-    addLog(taskId, 'Generating code');
+    addLog(taskId, 'Refining prompt');
 
     const generation = await generateProject({
       prompt: initial.prompt,
@@ -49,24 +49,44 @@ export async function runPipeline(taskId) {
     }
 
     updateTask(taskId, { status: TASK_STATES.BUILDING });
-    addLog(taskId, 'Building project');
+    addLog(taskId, 'Building project (npm install + vite build)');
     await sleep(TRANSIENT_DELAY_MS);
 
     updateTask(taskId, { status: TASK_STATES.DEPLOYING });
     addLog(taskId, 'Deploying preview');
+
+    const files = Array.isArray(generation.files) ? generation.files : [];
+    const fileSummary = summarizeFiles(files);
+
     updateTask(taskId, {
       previewUrl: generation.previewUrl,
       projectPath: generation.projectPath,
+      name: generation.name ?? null,
+      stack: generation.stack ?? null,
+      files,
     });
+
+    if (fileSummary) {
+      addLog(taskId, fileSummary);
+    }
+
     await sleep(TRANSIENT_DELAY_MS);
     updateTask(taskId, { status: TASK_STATES.DEPLOYED });
-    addLog(taskId, 'Ready for acceptance');
+    addLog(taskId, `Preview ready at ${generation.previewUrl}`);
 
     logger.info(`Pipeline finished for task ${taskId}`);
   } catch (err) {
     logger.error(`Pipeline failed for task ${taskId}:`, err.message);
     failTask(taskId, err);
   }
+}
+
+function summarizeFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) return null;
+  const modified = files.filter((f) => f.status === 'modified').length;
+  const created = files.length - modified;
+  if (modified === 0) return `Captured ${created} files in the project tree`;
+  return `Captured ${files.length} files (${modified} modified, ${created} from scaffolding)`;
 }
 
 export default runPipeline;
