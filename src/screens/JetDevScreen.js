@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, createElement } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated as RNAnimated, Easing, Modal, Linking, Platform, Dimensions } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet, Animated as RNAnimated, Easing, Modal, Linking, Platform, Dimensions, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
@@ -249,6 +249,7 @@ const ActivityRow = ({ label, subtitle, status, doneValue, doneColor = '#FFFFFF'
   const isNeutralValue = doneValue === 'Node.js';
   const isSuccessValue = !isNeutralValue;
   const isSearching = status !== 'done';
+  const isDeployStep = label.includes('Deploy') || label.includes('Health') || label.includes('Live');
 
   return (
     <RNAnimated.View style={[styles.activityRowWrap, { opacity: entryOpacity, transform: [{ translateX: entryX }] }]}>
@@ -267,20 +268,26 @@ const ActivityRow = ({ label, subtitle, status, doneValue, doneColor = '#FFFFFF'
         <View style={styles.activityRight}>
           {status === 'done' && isSuccessValue ? (
             <RNAnimated.View style={{ opacity: valueOpacity }}>
-              <MaskedView
-                maskElement={
-                  <Text style={styles.activityValueGradientMask} numberOfLines={1}>
-                    {doneValue}
-                  </Text>
-                }
-              >
-                <LinearGradient
-                  colors={['#FF318C', '#7B52FF']}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={{ height: 20, minWidth: 80 }}
-                />
-              </MaskedView>
+              {isDeployStep ? (
+                <MaskedView
+                  maskElement={
+                    <Text style={styles.activityValueGradientMask} numberOfLines={1}>
+                      {doneValue}
+                    </Text>
+                  }
+                >
+                  <LinearGradient
+                    colors={['#FF318C', '#7B52FF']}
+                    start={{ x: 0, y: 0.5 }}
+                    end={{ x: 1, y: 0.5 }}
+                    style={{ height: 20, minWidth: 80 }}
+                  />
+                </MaskedView>
+              ) : (
+                <View style={{ alignItems: 'flex-end', width: 40 }}>
+                  <CheckCircle size={16} color="#7B52FF" strokeWidth={2.5} />
+                </View>
+              )}
             </RNAnimated.View>
           ) : status === 'done' && isNeutralValue ? (
             <RNAnimated.View style={{ opacity: valueOpacity }}>
@@ -289,13 +296,38 @@ const ActivityRow = ({ label, subtitle, status, doneValue, doneColor = '#FFFFFF'
               </Text>
             </RNAnimated.View>
           ) : isSearching ? (
-            <RNAnimated.View style={[styles.activitySearchingWrap, { opacity: searchingOpacity }]}>
-              <Text style={styles.activitySearchingText}>Searching</Text>
-              <SearchingDots />
+            <RNAnimated.View style={{ opacity: searchingOpacity }}>
+              <CookingAnimation />
             </RNAnimated.View>
           ) : null}
         </View>
       </View>
+    </RNAnimated.View>
+  );
+};
+
+const CookingAnimation = () => {
+  const pulse = useRef(new RNAnimated.Value(0.4)).current;
+
+  useEffect(() => {
+    RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(pulse, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        RNAnimated.timing(pulse, { toValue: 0.4, duration: 600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+  }, [pulse]);
+
+  return (
+    <RNAnimated.View style={{ opacity: pulse, flexDirection: 'row', alignItems: 'center' }}>
+      <MaskedView maskElement={<Text style={{ fontSize: 13, fontWeight: '800', letterSpacing: 0.5 }}>Cooking...</Text>}>
+        <LinearGradient
+          colors={['#FF318C', '#7B52FF']}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={{ width: 75, height: 18 }}
+        />
+      </MaskedView>
     </RNAnimated.View>
   );
 };
@@ -783,8 +815,7 @@ export default function JetDevScreen() {
 
   const LOG_TO_CANONICAL = [
     { re: /^understanding request$/i, step: CANONICAL.understanding },
-    { re: /^generating code$/i, step: CANONICAL.generating },
-    { re: /^building project$/i, step: CANONICAL.building },
+    // We handle generating and building completion via FEED events for better sync
     { re: /^deploying preview$/i, step: CANONICAL.deploying },
     { re: /^ready for acceptance$/i, step: CANONICAL.ready },
   ];
@@ -838,7 +869,7 @@ export default function JetDevScreen() {
               parse: 'understanding',
               design: 'understanding',
               code: 'generating',
-              deps: 'generating',
+              deps: 'building',
               build: 'building',
               deploy: 'deploying',
               health: 'ready',
@@ -855,12 +886,32 @@ export default function JetDevScreen() {
             };
             const canonicalKey = FEED_KEY_TO_CANONICAL[keyPart] || keyPart;
             const ui = FEED_UI[keyPart] || { title: label, desc: '' };
-            // Slow down bursts slightly for a calmer, premium feel
+
+            // Synchronization: Only mark as 'done' when the phase or its successor truly finishes
+            let targetStatus = (phase === 'start' || phase === 'update') ? 'searching' : 'done';
+
+            if (keyPart === 'code' && phase === 'done') {
+              // Generation is 'done' in backend, but we keep the UI 'searching' (Cooking...)
+              // until the next slowed-down phase (deps) actually starts.
+              return; 
+            }
+            if (keyPart === 'deps') {
+              if (phase === 'start') {
+                // Dependency phase started! This is the perfect time to mark Generating as DONE.
+                upsertFeedStep(CANONICAL.generating, 'done');
+                targetStatus = 'searching';
+              } else {
+                // Dependency phase finished! But Building row should stay 'searching' 
+                // until the actual 'build' phase also finishes.
+                targetStatus = 'searching';
+              }
+            }
+
             const delayed = phase === 'start' ? 0 : 220;
             setTimeout(() => {
               upsertFeedStep(
                 { key: canonicalKey, label: ui.title, doneValue: value || 'OK', doneColor: '#8A8A8A' },
-                phase === 'start' ? 'searching' : 'done',
+                targetStatus,
                 { subtitle: ui.desc }
               );
             }, delayed);
@@ -940,6 +991,12 @@ export default function JetDevScreen() {
       setTaskError(incoming.error || 'Pipeline failed');
       setIsExpanded(false);
       setTimeout(() => setState('error'), 300);
+      setAccepting(false);
+    }
+    if (incoming.status === 'accepted') {
+      setIsExpanded(false);
+      setTimeout(() => setState('success'), 250);
+      setAccepting(false);
     }
   };
 
@@ -988,13 +1045,21 @@ export default function JetDevScreen() {
     try {
       const accepted = await acceptTask(task.id);
       setTask(accepted);
-      setIsExpanded(false);
-      setTimeout(() => setState('success'), 250);
+      
+      if (cancelPollRef.current) cancelPollRef.current();
+      cancelPollRef.current = pollTask(task.id, {
+        onUpdate: (updated) => ingestTaskUpdate(updated),
+        onError: (err) => {
+          setTaskError(err?.message ? `${err.message} (${API_BASE})` : `Failed to push to GitHub (${API_BASE})`);
+          setIsExpanded(false);
+          setTimeout(() => setState('error'), 300);
+          setAccepting(false);
+        }
+      });
     } catch (err) {
       setTaskError(err?.message ? `${err.message} (${API_BASE})` : `Failed to push to GitHub (${API_BASE})`);
       setIsExpanded(false);
       setTimeout(() => setState('error'), 300);
-    } finally {
       setAccepting(false);
     }
   };
@@ -1625,7 +1690,14 @@ export default function JetDevScreen() {
             <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Connect database</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
             <View style={styles.nextStepItem}><View style={styles.nextStepDot} /><Text style={styles.nextStepText}>Add validation</Text><ChevronRight size={14} color="#7B52FF" strokeWidth={2.5} /></View>
             <View style={styles.actionColumn}>
-              <TouchableOpacity onPress={handleAccept} style={styles.primaryBtn} activeOpacity={0.8}><GitBranch size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} /><Text style={styles.primaryBtnText}>Accept & Commit to Git</Text></TouchableOpacity>
+              <TouchableOpacity onPress={handleAccept} style={[styles.primaryBtn, accepting && { opacity: 0.8 }]} activeOpacity={0.8} disabled={accepting}>
+                {accepting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 8 }} />
+                ) : (
+                  <GitBranch size={15} color="#FFFFFF" strokeWidth={2} style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.primaryBtnText}>{accepting ? 'Pushing to GitHub...' : 'Accept & Commit to Git'}</Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => setState('empty')} style={styles.destructiveLink} activeOpacity={0.6}><Text style={styles.destructiveLinkText}>Discard environment</Text></TouchableOpacity>
             </View>
           </View>

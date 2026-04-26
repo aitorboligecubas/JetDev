@@ -484,11 +484,11 @@ async function generateProject({ prompt, taskId }) {
   emit("code", "done", "Generating code", codeSource === "Junie" ? "Junie" : "OpenAI");
 
   const _sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  await _sleep(800);
+  await _sleep(60000); // 60 seconds as requested
 
   // 4: Build
   emit("deps", "start", "Installing dependencies");
-  await _sleep(1200);
+  await _sleep(2000);
   console.log("\n📦 [4/5] Building project...");
   try {
     execSync("npm install", { cwd: projectPath, stdio: "pipe", timeout: 120000 });
@@ -496,10 +496,10 @@ async function generateProject({ prompt, taskId }) {
     throw new Error(`Build failed: ${(e.stderr || e.message).toString().slice(0, 300)}`);
   }
   emit("deps", "done", "Installing dependencies", "npm");
-  await _sleep(750);
+  await _sleep(1500);
 
   emit("build", "start", "Building project");
-  await _sleep(1400);
+  await _sleep(2500);
   try {
     execSync("npm run build", { cwd: projectPath, stdio: "pipe", timeout: 60000 });
   } catch (e) {
@@ -525,26 +525,26 @@ async function generateProject({ prompt, taskId }) {
   }
   console.log("   ✅ Build successful");
   emit("build", "done", "Building project", "Vite");
-  await _sleep(900);
+  await _sleep(1500);
 
   // 5: Deploy
   emit("deploy", "start", "Deploying preview");
-  await _sleep(1600);
+  await _sleep(2500);
   console.log("\n🌐 [5/5] Deploying preview...");
   const previewUrl = await deployPreview(projectPath, taskId);
   console.log(`   ✅ Preview live at ${previewUrl}`);
   emit("deploy", "done", "Deploying preview", "Live");
-  await _sleep(800);
+  await _sleep(1500);
 
   emit("health", "start", "Running health check");
-  await _sleep(1100);
+  await _sleep(2000);
   const hc = await healthCheck(previewUrl);
   if (hc && hc.statusCode) {
     emit("health", "done", "Running health check", `${hc.statusCode} OK · ${hc.ms}ms`);
   } else {
     emit("health", "done", "Running health check", "OK");
   }
-  await _sleep(600);
+  await _sleep(1500);
 
   console.log("\n══════════════════════════════════════════════════");
   console.log(`  ✅ DONE — Task ${taskId}`);
